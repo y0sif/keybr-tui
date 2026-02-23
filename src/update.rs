@@ -2,34 +2,45 @@ use std::time::Instant;
 
 use crossterm::event::{KeyCode, KeyModifiers};
 
-use crate::app::{App, ErrorMode};
+use crate::app::{App, AppScreen, ErrorMode};
 use crate::events::AppEvent;
 
 pub fn update(app: &mut App, event: AppEvent) {
     match event {
         AppEvent::Key(key) => handle_key(app, key),
-        AppEvent::Tick => {
-            // Nothing to do on tick — WPM and accuracy are computed on render.
-        }
-        AppEvent::Resize(_, _) => {
-            // Layout recomputes automatically from the new terminal size.
-            // Cursor position is derived from `cursor_pos` index each frame.
-        }
+        AppEvent::Tick => {}
+        AppEvent::Resize(_, _) => {}
     }
 }
 
 fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
     use KeyCode::*;
 
-    match key.code {
-        // Quit
-        Char('q') if key.modifiers == KeyModifiers::NONE => {
-            app.running = false;
-        }
-        Char('c') if key.modifiers == KeyModifiers::CONTROL => {
-            app.running = false;
-        }
+    // Global quit — Escape never conflicts with typing
+    if key.code == Esc {
+        app.running = false;
+        return;
+    }
+    if key.code == Char('c') && key.modifiers == KeyModifiers::CONTROL {
+        app.running = false;
+        return;
+    }
 
+    match app.screen {
+        AppScreen::LessonSummary => {
+            // Any key starts the next lesson
+            app.start_next_lesson();
+        }
+        AppScreen::Typing => {
+            handle_typing_key(app, key);
+        }
+    }
+}
+
+fn handle_typing_key(app: &mut App, key: crossterm::event::KeyEvent) {
+    use KeyCode::*;
+
+    match key.code {
         // Toggle error mode
         Tab => {
             app.error_mode = match app.error_mode {
@@ -38,17 +49,15 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
             };
         }
 
-        // Adjust proficiency speed threshold
+        // Adjust WPM goal
         Char('+') | Char('=') => {
-            // Easier: lower the required reaction time
-            app.target_speed_ms = app.target_speed_ms.saturating_sub(25).max(100);
+            app.target_wpm = (app.target_wpm + 5).min(200);
         }
         Char('-') => {
-            // Harder: raise the required reaction time
-            app.target_speed_ms = (app.target_speed_ms + 25).min(2000);
+            app.target_wpm = app.target_wpm.saturating_sub(5).max(10);
         }
 
-        // Typing input
+        // Typing input — includes space
         Char(typed) => {
             handle_typed_char(app, typed);
         }
@@ -58,14 +67,13 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
 }
 
 fn handle_typed_char(app: &mut App, typed: char) {
-    // Don't process if already past end of text
     if app.cursor_pos >= app.generated_text.chars().count() {
         return;
     }
 
-    // Start session timer on first keystroke
-    if app.session_start.is_none() {
-        app.session_start = Some(Instant::now());
+    // Start lesson timer on first keystroke
+    if app.lesson_start.is_none() {
+        app.lesson_start = Some(Instant::now());
         app.key_target_start = Some(Instant::now());
     }
 
@@ -74,64 +82,50 @@ fn handle_typed_char(app: &mut App, typed: char) {
         None => return,
     };
 
-    // Skip spaces automatically — they're structural, not typed characters.
-    // The cursor advances through spaces without user input.
-    // (We handle the space character as a separator, not a key to type.)
-    // Actually, spaces are included as typed characters for realism.
-
     let reaction_ms = app
         .key_target_start
         .map(|t| t.elapsed().as_millis() as u64)
         .unwrap_or(0);
 
     if typed == target {
-        // Correct keystroke
-        let stats = app.per_key_stats.entry(target).or_default();
-        // Only record reaction for actual letters (not spaces)
+        // Correct keystroke — record stats for letters (not spaces)
         if target != ' ' {
+            let stats = app.per_key_stats.entry(target).or_default();
             stats.record_hit(reaction_ms);
+            app.lesson_positions += 1;
         }
-        app.correct_chars += 1;
+        app.lesson_correct += 1;
         app.cursor_pos += 1;
         app.key_target_start = Some(Instant::now());
 
-        // Skip any spaces automatically so the next target is always a letter
-        while app.cursor_pos < app.generated_text.chars().count() {
-            if app.generated_text.chars().nth(app.cursor_pos) == Some(' ') {
-                app.cursor_pos += 1;
-                app.correct_chars += 1;
-            } else {
-                break;
-            }
-        }
-
-        // Check if we've finished the current batch
+        // Check if we've finished the current lesson
         if app.cursor_pos >= app.generated_text.chars().count() {
-            app.advance_batch();
+            app.finish_lesson();
         }
     } else {
         // Wrong keystroke
-        let stats = app.per_key_stats.entry(target).or_default();
         if target != ' ' {
+            let stats = app.per_key_stats.entry(target).or_default();
             stats.record_error();
+            // Only count first-try errors (don't double-count in StopOnError mode)
+            if !app.error_positions.contains(&app.cursor_pos) {
+                app.lesson_positions += 1;
+                app.lesson_errors += 1;
+            }
         }
 
         match app.error_mode {
             ErrorMode::MoveOn => {
-                // Mark the position as an error and advance
                 app.error_positions.insert(app.cursor_pos);
                 app.cursor_pos += 1;
                 app.key_target_start = Some(Instant::now());
 
-                // Check if finished
                 if app.cursor_pos >= app.generated_text.chars().count() {
-                    app.advance_batch();
+                    app.finish_lesson();
                 }
             }
             ErrorMode::StopOnError => {
-                // Cursor stays; just record the error (don't double-count)
                 app.error_positions.insert(app.cursor_pos);
-                // Reset the reaction timer so we don't accumulate huge times
                 app.key_target_start = Some(Instant::now());
             }
         }

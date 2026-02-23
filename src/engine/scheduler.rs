@@ -57,6 +57,7 @@ impl LetterScheduler {
         }
     }
 
+    #[allow(dead_code)]
     pub fn all_unlocked(&self) -> bool {
         self.unlock_index >= UNLOCK_ORDER.len()
     }
