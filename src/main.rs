@@ -33,7 +33,7 @@ fn main() -> color_eyre::Result<()> {
 
     let error_mode = match cli.error_mode.as_str() {
         "stop-on-error" | "stop" => ErrorMode::StopOnError,
-        _ => ErrorMode::MoveOn,
+        _ => ErrorMode::ForgiveMistakes,
     };
 
     let mut terminal = tui::init()?;

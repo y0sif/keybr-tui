@@ -6,10 +6,10 @@ use crate::metrics::KeyStats;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorMode {
-    /// Cursor advances even on wrong key; character is marked red.
-    MoveOn,
-    /// Cursor stays until the correct key is pressed.
+    /// Must fix errors before continuing (backspace required).
     StopOnError,
+    /// Can continue past errors, backspace optional.
+    ForgiveMistakes,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -24,6 +24,8 @@ pub struct LessonResult {
     pub accuracy: f64,
     /// Letter that was unlocked at the end of this lesson, if any.
     pub newly_unlocked: Option<char>,
+    /// Top weakest keys with their confidence levels (sorted weakest first).
+    pub weakest_keys: Vec<(char, f64)>,
 }
 
 pub struct App {
@@ -36,6 +38,12 @@ pub struct App {
     pub cursor_pos: usize,
     /// Indices of characters that were typed incorrectly.
     pub error_positions: HashSet<usize>,
+    /// Characters that were typed correctly on first attempt (no backspace correction).
+    pub first_attempt_correct: HashSet<usize>,
+    /// Characters that were corrected after an error (was wrong, then fixed).
+    pub recovered_positions: HashSet<usize>,
+    /// Positions that have ever been in error (tracks history, not cleared by backspace).
+    pub ever_error_positions: HashSet<usize>,
 
     // --- Per-lesson metrics (reset each lesson) ---
     /// When the first key of the current lesson was pressed.
@@ -55,6 +63,9 @@ pub struct App {
     // --- Last lesson's results (shown in stats bar during next lesson) ---
     pub last_lesson: Option<LessonResult>,
 
+    /// Number of lessons completed in the current session.
+    pub lesson_count: u32,
+
     // --- Engine ---
     pub scheduler: LetterScheduler,
     pub generator: WordGenerator,
@@ -68,7 +79,7 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
-        Self::new_with_opts(35, ErrorMode::MoveOn) // 35 WPM = 175 CPM
+        Self::new_with_opts(35, ErrorMode::ForgiveMistakes) // 35 WPM = 175 CPM
     }
 
     pub fn new_with_opts(target_wpm: u32, error_mode: ErrorMode) -> Self {
@@ -89,6 +100,9 @@ impl App {
             generated_text: text,
             cursor_pos: 0,
             error_positions: HashSet::new(),
+            first_attempt_correct: HashSet::new(),
+            recovered_positions: HashSet::new(),
+            ever_error_positions: HashSet::new(),
             lesson_start: None,
             lesson_correct: 0,
             lesson_positions: 0,
@@ -96,6 +110,7 @@ impl App {
             per_key_stats: stats,
             key_target_start: None,
             last_lesson: None,
+            lesson_count: 0,
             scheduler,
             generator,
             error_mode,
@@ -113,7 +128,8 @@ impl App {
         self.target_cpm = wpm as f64 * 5.0;
     }
 
-    /// WPM for the current lesson so far (live, used only internally).
+    /// WPM for the current lesson so far.
+    /// Only first-attempt correct characters count toward speed.
     pub fn lesson_wpm(&self) -> f64 {
         let start = match self.lesson_start {
             Some(s) => s,
@@ -123,7 +139,9 @@ impl App {
         if elapsed_secs < 1.0 {
             return 0.0;
         }
-        (self.lesson_correct as f64 / 5.0) / (elapsed_secs / 60.0)
+        // Use first_attempt_correct count for accurate WPM
+        let correct_chars = self.first_attempt_correct.len() as f64;
+        (correct_chars / 5.0) / (elapsed_secs / 60.0)
     }
 
     /// Accuracy for the current lesson so far.
@@ -138,6 +156,7 @@ impl App {
     /// Called when the user finishes typing all chars in the current batch.
     /// Saves lesson results, runs scheduler, transitions to summary screen.
     pub fn finish_lesson(&mut self) {
+        self.lesson_count += 1;
         let wpm = self.lesson_wpm();
         let accuracy = self.lesson_accuracy();
 
@@ -152,10 +171,25 @@ impl App {
             None
         };
 
+        // Compute weakest keys (lowest confidence among active keys)
+        let mut key_confidences: Vec<(char, f64)> = self
+            .scheduler
+            .active_keys
+            .iter()
+            .filter_map(|&k| {
+                self.per_key_stats
+                    .get(&k)
+                    .map(|s| (k, s.confidence(self.target_cpm)))
+            })
+            .collect();
+        key_confidences.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        let weakest_keys: Vec<(char, f64)> = key_confidences.into_iter().take(5).collect();
+
         self.last_lesson = Some(LessonResult {
             wpm,
             accuracy,
             newly_unlocked,
+            weakest_keys,
         });
         self.screen = AppScreen::LessonSummary;
     }
@@ -167,6 +201,9 @@ impl App {
         self.generated_text = self.generator.generate_fragment(&filter, 100);
         self.cursor_pos = 0;
         self.error_positions.clear();
+        self.first_attempt_correct.clear();
+        self.recovered_positions.clear();
+        self.ever_error_positions.clear();
         self.key_target_start = None;
         self.lesson_start = None;
         self.lesson_correct = 0;
@@ -211,7 +248,7 @@ mod tests {
 
     #[test]
     fn target_wpm_conversion() {
-        let app = App::new_with_opts(35, ErrorMode::MoveOn);
+        let app = App::new_with_opts(35, ErrorMode::ForgiveMistakes);
         assert_eq!(app.target_wpm(), 35);
         assert!((app.target_cpm - 175.0).abs() < f64::EPSILON);
     }

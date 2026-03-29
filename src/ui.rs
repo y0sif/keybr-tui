@@ -111,8 +111,13 @@ fn build_spans(app: &App) -> Vec<Span<'static>> {
         let s = ch.to_string();
         let span = if i < app.cursor_pos {
             if app.error_positions.contains(&i) {
+                // Error: not yet fixed (red)
                 Span::styled(s, Style::default().fg(Color::Red))
+            } else if app.recovered_positions.contains(&i) {
+                // Recovered: was wrong, backspaced and fixed (yellow)
+                Span::styled(s, Style::default().fg(Color::Yellow))
             } else {
+                // Correct first try (green)
                 Span::styled(s, Style::default().fg(Color::Green))
             }
         } else if i == app.cursor_pos {
@@ -130,7 +135,7 @@ fn build_spans(app: &App) -> Vec<Span<'static>> {
 
 fn render_stats(app: &App, frame: &mut Frame, area: Rect) {
     let mode_label = match app.error_mode {
-        ErrorMode::MoveOn => "move-on",
+        ErrorMode::ForgiveMistakes => "forgive",
         ErrorMode::StopOnError => "stop",
     };
 
@@ -139,15 +144,21 @@ fn render_stats(app: &App, frame: &mut Frame, area: Rect) {
         None => "focus: -".to_string(),
     };
 
+    let lesson_label = if app.lesson_count > 0 {
+        format!("lesson {}", app.lesson_count)
+    } else {
+        "lesson 0".to_string()
+    };
+
     let stats_text = if let Some(last) = &app.last_lesson {
         format!(
-            " last: {:.0} wpm {:.0}%   goal: {} wpm [+/-]   {}   mode: {} [tab]   esc: quit",
-            last.wpm, last.accuracy, app.target_wpm(), focused_label, mode_label
+            " {}   last: {:.0} wpm {:.0}%   goal: {} wpm [+/-]   {}   mode: {} [tab]   esc: quit",
+            lesson_label, last.wpm, last.accuracy, app.target_wpm(), focused_label, mode_label
         )
     } else {
         format!(
-            " no lesson yet   goal: {} wpm [+/-]   {}   mode: {} [tab]   esc: quit",
-            app.target_wpm(), focused_label, mode_label
+            " {}   goal: {} wpm [+/-]   {}   mode: {} [tab]   esc: quit",
+            lesson_label, app.target_wpm(), focused_label, mode_label
         )
     };
 
@@ -215,6 +226,30 @@ fn render_summary_screen(app: &App, frame: &mut Frame) {
                     .add_modifier(Modifier::BOLD),
             ),
         ]));
+    }
+
+    // Weakest keys section
+    if !result.weakest_keys.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "  weakest keys",
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        )));
+        for &(key, conf) in &result.weakest_keys {
+            let conf_style = if conf >= 1.0 {
+                Style::default().fg(Color::Green)
+            } else if conf >= 0.5 {
+                Style::default().fg(Color::Yellow)
+            } else {
+                Style::default().fg(Color::Red)
+            };
+            lines.push(Line::from(vec![
+                Span::styled(format!("    {} ", key), Style::default().fg(Color::White)),
+                Span::styled(format!("{:.0}%", conf * 100.0), conf_style),
+            ]));
+        }
     }
 
     lines.push(Line::from(""));
