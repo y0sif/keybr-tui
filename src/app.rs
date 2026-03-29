@@ -1,8 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
+use crate::config::{Config, ErrorModeSerde};
 use crate::engine::{LetterFilter, LetterScheduler, WordGenerator};
 use crate::metrics::KeyStats;
+use crate::persistence::{SavedKeyStats, SavedStats};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorMode {
@@ -83,9 +85,44 @@ impl App {
     }
 
     pub fn new_with_opts(target_wpm: u32, error_mode: ErrorMode) -> Self {
+        Self::new_with_state(target_wpm, error_mode, None)
+    }
+
+    /// Create a new App, optionally restoring state from saved stats.
+    pub fn new_with_state(
+        target_wpm: u32,
+        error_mode: ErrorMode,
+        saved: Option<SavedStats>,
+    ) -> Self {
         let mut scheduler = LetterScheduler::new();
-        let stats: HashMap<char, KeyStats> = HashMap::new();
+        let mut stats: HashMap<char, KeyStats> = HashMap::new();
         let target_cpm = target_wpm as f64 * 5.0;
+        let mut lesson_count: u32 = 0;
+
+        // Restore from saved stats if available
+        if let Some(saved) = saved {
+            // Restore per-key stats
+            for (ch, saved_key) in &saved.keys {
+                let key_stats = stats.entry(*ch).or_default();
+                key_stats.attempts = saved_key.attempts;
+                key_stats.errors = saved_key.errors;
+                key_stats.filtered_time_ms = saved_key.filtered_time_ms;
+                key_stats.best_filtered_time_ms = saved_key.best_filtered_time_ms;
+                // Restore recent times (up to 20 most recent, matching KeyStats cap)
+                let recent = &saved_key.recent_times_ms;
+                let start = recent.len().saturating_sub(20);
+                key_stats.reaction_times_ms = recent[start..].to_vec();
+            }
+
+            // Restore unlocked letters into scheduler
+            if saved.unlocked_letters.len() >= 6 {
+                scheduler.active_keys = saved.unlocked_letters;
+                // Set unlock_index based on how many keys are active
+                scheduler.set_unlock_index_from_active();
+            }
+
+            lesson_count = saved.total_lessons;
+        }
 
         // Initial scheduler update to set focused key
         scheduler.update(&stats, target_cpm);
@@ -110,7 +147,7 @@ impl App {
             per_key_stats: stats,
             key_target_start: None,
             last_lesson: None,
-            lesson_count: 0,
+            lesson_count,
             scheduler,
             generator,
             error_mode,
@@ -210,6 +247,59 @@ impl App {
         self.lesson_positions = 0;
         self.lesson_errors = 0;
         self.screen = AppScreen::Typing;
+    }
+
+    /// Convert current app state to a `SavedStats` for persistence.
+    pub fn to_saved_stats(&self) -> SavedStats {
+        let mut keys = HashMap::new();
+        for (ch, key_stats) in &self.per_key_stats {
+            // Keep up to 50 recent reaction times for persistence
+            let recent: Vec<u64> = key_stats.reaction_times_ms.to_vec();
+            keys.insert(
+                *ch,
+                SavedKeyStats {
+                    attempts: key_stats.attempts,
+                    errors: key_stats.errors,
+                    filtered_time_ms: key_stats.filtered_time_ms,
+                    best_filtered_time_ms: key_stats.best_filtered_time_ms,
+                    recent_times_ms: recent,
+                },
+            );
+        }
+
+        SavedStats {
+            version: 1,
+            keys,
+            unlocked_letters: self.scheduler.active_keys.clone(),
+            total_lessons: self.lesson_count,
+            last_session: chrono_now_iso8601(),
+        }
+    }
+
+    /// Convert current app settings to a `Config` for persistence.
+    pub fn to_config(&self) -> Config {
+        Config {
+            target_wpm: self.target_wpm(),
+            error_mode: match self.error_mode {
+                ErrorMode::ForgiveMistakes => ErrorModeSerde::ForgiveMistakes,
+                ErrorMode::StopOnError => ErrorModeSerde::StopOnError,
+            },
+            fragment_length: 100,
+        }
+    }
+}
+
+/// Simple ISO 8601 timestamp without depending on chrono.
+fn chrono_now_iso8601() -> String {
+    // Use std::time to produce a Unix timestamp, format manually
+    use std::time::SystemTime;
+    match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+        Ok(d) => {
+            let secs = d.as_secs();
+            // Approximate: good enough for a "last session" marker
+            format!("{secs}")
+        }
+        Err(_) => "0".to_string(),
     }
 }
 

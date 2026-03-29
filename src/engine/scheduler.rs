@@ -32,6 +32,12 @@ impl LetterScheduler {
         }
     }
 
+    /// Set `unlock_index` to match the current `active_keys` length.
+    /// Used when restoring state from saved stats.
+    pub fn set_unlock_index_from_active(&mut self) {
+        self.unlock_index = self.active_keys.len();
+    }
+
     /// Update which keys are included based on current confidence levels.
     ///
     /// - Minimum 6 keys always included

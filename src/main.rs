@@ -1,7 +1,9 @@
 mod app;
+mod config;
 mod engine;
 mod events;
 mod metrics;
+mod persistence;
 mod tui;
 mod ui;
 mod update;
@@ -9,7 +11,9 @@ mod update;
 use clap::Parser;
 
 use app::{App, ErrorMode};
+use config::{Config, ErrorModeSerde};
 use events::setup_event_channel;
+use persistence::SavedStats;
 use ui::view;
 use update::update;
 
@@ -18,12 +22,20 @@ use update::update;
 #[command(version, about)]
 struct Cli {
     /// Target typing speed in words per minute.
-    #[arg(long, default_value_t = 30)]
-    target_wpm: u32,
+    #[arg(long)]
+    target_wpm: Option<u32>,
 
     /// Error handling mode: "move-on" or "stop-on-error".
-    #[arg(long, default_value = "move-on")]
-    error_mode: String,
+    #[arg(long)]
+    error_mode: Option<String>,
+
+    /// Delete saved stats and start fresh (keeps config).
+    #[arg(long)]
+    reset: bool,
+
+    /// Print the data directory path and exit.
+    #[arg(long)]
+    data_dir: bool,
 }
 
 fn main() -> color_eyre::Result<()> {
@@ -31,14 +43,56 @@ fn main() -> color_eyre::Result<()> {
 
     let cli = Cli::parse();
 
-    let error_mode = match cli.error_mode.as_str() {
-        "stop-on-error" | "stop" => ErrorMode::StopOnError,
-        _ => ErrorMode::ForgiveMistakes,
+    // --data-dir: print path and exit
+    if cli.data_dir {
+        match SavedStats::path() {
+            Some(p) => {
+                if let Some(dir) = p.parent() {
+                    println!("{}", dir.display());
+                }
+            }
+            None => eprintln!("Could not determine data directory for this platform."),
+        }
+        return Ok(());
+    }
+
+    // --reset: delete stats file and continue fresh
+    if cli.reset {
+        match SavedStats::delete() {
+            Ok(true) => println!("Stats reset. Starting fresh."),
+            Ok(false) => println!("No stats file found. Starting fresh."),
+            Err(e) => eprintln!("Warning: could not delete stats: {e}"),
+        }
+    }
+
+    // Load config from disk
+    let config = Config::load();
+
+    // Determine settings: CLI args override config file
+    let target_wpm = cli.target_wpm.unwrap_or(config.target_wpm);
+
+    let error_mode = if let Some(ref mode_str) = cli.error_mode {
+        match mode_str.as_str() {
+            "stop-on-error" | "stop" => ErrorMode::StopOnError,
+            _ => ErrorMode::ForgiveMistakes,
+        }
+    } else {
+        match config.error_mode {
+            ErrorModeSerde::StopOnError => ErrorMode::StopOnError,
+            ErrorModeSerde::ForgiveMistakes => ErrorMode::ForgiveMistakes,
+        }
+    };
+
+    // Load saved stats (unless --reset was used)
+    let saved_stats = if cli.reset {
+        None
+    } else {
+        SavedStats::load()
     };
 
     let mut terminal = tui::init()?;
 
-    let mut app = App::new_with_opts(cli.target_wpm, error_mode);
+    let mut app = App::new_with_state(target_wpm, error_mode, saved_stats);
     let rx = setup_event_channel();
 
     while app.running {

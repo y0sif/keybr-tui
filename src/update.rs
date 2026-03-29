@@ -5,6 +5,22 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use crate::app::{App, AppScreen, ErrorMode};
 use crate::events::AppEvent;
 
+/// Save stats to disk, logging errors to stderr without crashing.
+fn auto_save_stats(app: &App) {
+    let saved = app.to_saved_stats();
+    if let Err(e) = saved.save() {
+        eprintln!("Warning: failed to save stats: {e}");
+    }
+}
+
+/// Save config to disk, logging errors to stderr without crashing.
+fn auto_save_config(app: &App) {
+    let cfg = app.to_config();
+    if let Err(e) = cfg.save() {
+        eprintln!("Warning: failed to save config: {e}");
+    }
+}
+
 pub fn update(app: &mut App, event: AppEvent) {
     match event {
         AppEvent::Key(key) => handle_key(app, key),
@@ -18,10 +34,12 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
 
     // Global quit — Escape never conflicts with typing
     if key.code == Esc {
+        auto_save_stats(app);
         app.running = false;
         return;
     }
     if key.code == Char('c') && key.modifiers == KeyModifiers::CONTROL {
+        auto_save_stats(app);
         app.running = false;
         return;
     }
@@ -47,16 +65,19 @@ fn handle_typing_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 ErrorMode::ForgiveMistakes => ErrorMode::StopOnError,
                 ErrorMode::StopOnError => ErrorMode::ForgiveMistakes,
             };
+            auto_save_config(app);
         }
 
         // Adjust WPM goal
         Char('+') | Char('=') => {
             let new_wpm = (app.target_wpm() + 5).min(200);
             app.set_target_wpm(new_wpm);
+            auto_save_config(app);
         }
         Char('-') => {
             let new_wpm = app.target_wpm().saturating_sub(5).max(10);
             app.set_target_wpm(new_wpm);
+            auto_save_config(app);
         }
 
         // Backspace — move cursor back and clear error mark
@@ -134,6 +155,7 @@ fn handle_typed_char(app: &mut App, typed: char) {
         // Check if we've finished the current lesson
         if app.cursor_pos >= app.generated_text.chars().count() {
             app.finish_lesson();
+            auto_save_stats(app);
         }
     } else {
         // Wrong keystroke
