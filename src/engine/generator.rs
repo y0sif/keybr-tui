@@ -22,7 +22,7 @@ pub fn generate_text(active_keys: &[char], stats: &HashMap<char, KeyStats>) -> S
         .map(|&c| {
             let weight = stats
                 .get(&c)
-                .map(|s| weakness_weight(s))
+                .map(weakness_weight)
                 .unwrap_or(100); // untouched keys get a moderate boost
             (c, weight)
         })
@@ -131,7 +131,7 @@ fn weakness_weight(stats: &KeyStats) -> u32 {
     // Base weight inversely proportional to speed, boosted by errors
     let speed_score = (avg / 10.0).min(200.0) as u32;
     let error_boost = (err * 100.0) as u32;
-    (speed_score + error_boost).max(10).min(300)
+    (speed_score + error_boost).clamp(10, 300)
 }
 
 /// Simple deterministic PRNG (xorshift32) — no external rand crate needed.
@@ -141,12 +141,16 @@ pub struct SimpleRng {
 
 impl SimpleRng {
     pub fn new() -> Self {
-        // Seed from a non-constant source: use address of a stack var as entropy
-        let seed_source: u32 = 0xDEAD_BEEF;
-        // Mix in something that varies per process (stack address bits)
-        let addr = &seed_source as *const u32 as u64;
-        let seed = (seed_source ^ (addr as u32)).max(1);
-        SimpleRng { state: seed }
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u32;
+        Self { state: seed | 1 } // ensure non-zero
+    }
+
+    #[cfg(test)]
+    pub fn with_seed(seed: u32) -> Self {
+        Self { state: seed | 1 }
     }
 
     pub fn next_u32(&mut self) -> u32 {
@@ -154,5 +158,65 @@ impl SimpleRng {
         self.state ^= self.state >> 17;
         self.state ^= self.state << 5;
         self.state
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generated_text_only_contains_active_letters_and_spaces() {
+        let active = vec!['e', 't', 'a', 'o', 'i', 'n'];
+        let stats = HashMap::new();
+        let text = generate_text(&active, &stats);
+
+        for ch in text.chars() {
+            assert!(
+                ch == ' ' || active.contains(&ch),
+                "unexpected character '{}' in generated text",
+                ch
+            );
+        }
+    }
+
+    #[test]
+    fn generated_text_is_at_least_55_chars() {
+        let active = vec!['e', 't', 'a', 'o', 'i', 'n'];
+        let stats = HashMap::new();
+        let text = generate_text(&active, &stats);
+        assert!(text.len() >= 55, "text too short: {} chars", text.len());
+    }
+
+    #[test]
+    fn generated_text_contains_spaces() {
+        let active = vec!['e', 't', 'a', 'o', 'i', 'n'];
+        let stats = HashMap::new();
+        let text = generate_text(&active, &stats);
+        assert!(text.contains(' '), "generated text should contain spaces between words");
+    }
+
+    #[test]
+    fn simple_rng_produces_different_values() {
+        let mut rng = SimpleRng::with_seed(42);
+        let a = rng.next_u32();
+        let b = rng.next_u32();
+        let c = rng.next_u32();
+        assert_ne!(a, b);
+        assert_ne!(b, c);
+    }
+
+    #[test]
+    fn generated_text_with_two_keys() {
+        let active = vec!['e', 't'];
+        let stats = HashMap::new();
+        let text = generate_text(&active, &stats);
+        for ch in text.chars() {
+            assert!(
+                ch == ' ' || ch == 'e' || ch == 't',
+                "unexpected character '{}' with two active keys",
+                ch
+            );
+        }
     }
 }

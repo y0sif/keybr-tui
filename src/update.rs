@@ -9,7 +9,7 @@ pub fn update(app: &mut App, event: AppEvent) {
     match event {
         AppEvent::Key(key) => handle_key(app, key),
         AppEvent::Tick => {}
-        AppEvent::Resize(_, _) => {}
+        AppEvent::Resize => {}
     }
 }
 

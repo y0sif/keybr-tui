@@ -2,45 +2,43 @@ mod app;
 mod engine;
 mod events;
 mod metrics;
+mod tui;
 mod ui;
 mod update;
 
-use std::io::stdout;
-use std::panic;
+use clap::Parser;
 
-use crossterm::{
-    execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
-};
-use ratatui::{Terminal, backend::CrosstermBackend};
-
-use app::App;
+use app::{App, ErrorMode};
 use events::setup_event_channel;
 use ui::view;
 use update::update;
 
-fn main() -> anyhow::Result<()> {
-    // Restore terminal if a panic occurs mid-session
-    let original_hook = panic::take_hook();
-    panic::set_hook(Box::new(move |info| {
-        let _ = restore_terminal();
-        original_hook(info);
-    }));
+/// A terminal typing trainer inspired by keybr.com with adaptive learning.
+#[derive(Parser)]
+#[command(version, about)]
+struct Cli {
+    /// Target typing speed in words per minute.
+    #[arg(long, default_value_t = 30)]
+    target_wpm: u32,
 
-    setup_terminal()?;
-
-    let result = run();
-
-    restore_terminal()?;
-
-    result
+    /// Error handling mode: "move-on" or "stop-on-error".
+    #[arg(long, default_value = "move-on")]
+    error_mode: String,
 }
 
-fn run() -> anyhow::Result<()> {
-    let backend = CrosstermBackend::new(stdout());
-    let mut terminal = Terminal::new(backend)?;
+fn main() -> color_eyre::Result<()> {
+    color_eyre::install()?;
 
-    let mut app = App::new();
+    let cli = Cli::parse();
+
+    let error_mode = match cli.error_mode.as_str() {
+        "stop-on-error" | "stop" => ErrorMode::StopOnError,
+        _ => ErrorMode::MoveOn,
+    };
+
+    let mut terminal = tui::init()?;
+
+    let mut app = App::new_with_opts(cli.target_wpm, error_mode);
     let rx = setup_event_channel();
 
     while app.running {
@@ -48,21 +46,11 @@ fn run() -> anyhow::Result<()> {
 
         match rx.recv() {
             Ok(event) => update(&mut app, event),
-            Err(_) => break, // channel closed (threads died)
+            Err(_) => break,
         }
     }
 
-    Ok(())
-}
+    tui::restore()?;
 
-fn setup_terminal() -> anyhow::Result<()> {
-    enable_raw_mode()?;
-    execute!(stdout(), EnterAlternateScreen)?;
-    Ok(())
-}
-
-fn restore_terminal() -> anyhow::Result<()> {
-    disable_raw_mode()?;
-    execute!(stdout(), LeaveAlternateScreen)?;
     Ok(())
 }

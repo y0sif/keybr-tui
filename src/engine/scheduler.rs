@@ -57,14 +57,82 @@ impl LetterScheduler {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn all_unlocked(&self) -> bool {
-        self.unlock_index >= UNLOCK_ORDER.len()
-    }
 }
 
 impl Default for LetterScheduler {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_proficient_stats(target_ms: u64) -> KeyStats {
+        let mut stats = KeyStats::default();
+        // Need at least 10 samples with avg <= target_ms and error_rate < 0.10
+        for _ in 0..15 {
+            stats.record_hit(target_ms - 10);
+        }
+        stats
+    }
+
+    #[test]
+    fn starts_with_six_keys() {
+        let sched = LetterScheduler::new();
+        assert_eq!(sched.active_keys.len(), 6);
+        assert_eq!(sched.active_keys, vec!['e', 't', 'a', 'o', 'i', 'n']);
+    }
+
+    #[test]
+    fn no_unlock_without_proficiency() {
+        let mut sched = LetterScheduler::new();
+        let stats = HashMap::new();
+        let result = sched.try_unlock(&stats, 400);
+        assert!(result.is_none());
+        assert_eq!(sched.active_keys.len(), 6);
+    }
+
+    #[test]
+    fn unlocks_next_letter_when_all_proficient() {
+        let mut sched = LetterScheduler::new();
+        let target_ms = 400;
+        let mut stats = HashMap::new();
+
+        // Make all 6 starter keys proficient
+        for &key in &['e', 't', 'a', 'o', 'i', 'n'] {
+            stats.insert(key, make_proficient_stats(target_ms));
+        }
+
+        let unlocked = sched.try_unlock(&stats, target_ms);
+        assert_eq!(unlocked, Some('s'));
+        assert_eq!(sched.active_keys.len(), 7);
+        assert!(sched.active_keys.contains(&'s'));
+    }
+
+    #[test]
+    fn sequential_unlocks() {
+        let mut sched = LetterScheduler::new();
+        let target_ms = 400;
+        let mut stats = HashMap::new();
+
+        // Make all starter keys proficient
+        for &key in &['e', 't', 'a', 'o', 'i', 'n'] {
+            stats.insert(key, make_proficient_stats(target_ms));
+        }
+
+        // First unlock: 's'
+        let first = sched.try_unlock(&stats, target_ms);
+        assert_eq!(first, Some('s'));
+
+        // Without making 's' proficient, no further unlock
+        let none = sched.try_unlock(&stats, target_ms);
+        assert!(none.is_none());
+
+        // Make 's' proficient too
+        stats.insert('s', make_proficient_stats(target_ms));
+        let second = sched.try_unlock(&stats, target_ms);
+        assert_eq!(second, Some('r'));
     }
 }

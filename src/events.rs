@@ -4,11 +4,10 @@ use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyEventKind};
 
-#[allow(dead_code)]
 pub enum AppEvent {
     Key(crossterm::event::KeyEvent),
     Tick,
-    Resize(u16, u16),
+    Resize,
 }
 
 pub fn setup_event_channel() -> Receiver<AppEvent> {
@@ -28,14 +27,14 @@ pub fn setup_event_channel() -> Receiver<AppEvent> {
         match event::read() {
             Ok(Event::Key(key)) => {
                 // Only process key press events, not release/repeat on some backends
-                if key.kind == KeyEventKind::Press {
-                    if tx.send(AppEvent::Key(key)).is_err() {
-                        break;
-                    }
+                if key.kind == KeyEventKind::Press
+                    && tx.send(AppEvent::Key(key)).is_err()
+                {
+                    break;
                 }
             }
-            Ok(Event::Resize(w, h)) => {
-                if tx.send(AppEvent::Resize(w, h)).is_err() {
+            Ok(Event::Resize(_, _)) => {
+                if tx.send(AppEvent::Resize).is_err() {
                     break;
                 }
             }

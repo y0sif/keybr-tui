@@ -49,3 +49,96 @@ impl KeyStats {
         self.avg_reaction_ms() <= target_ms as f64 && self.error_rate() < 0.10
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_key_stats_are_empty() {
+        let stats = KeyStats::default();
+        assert_eq!(stats.attempts, 0);
+        assert_eq!(stats.errors, 0);
+        assert!(stats.reaction_times_ms.is_empty());
+    }
+
+    #[test]
+    fn avg_reaction_ms_no_samples_returns_max() {
+        let stats = KeyStats::default();
+        assert_eq!(stats.avg_reaction_ms(), f64::MAX);
+    }
+
+    #[test]
+    fn avg_reaction_ms_calculates_correctly() {
+        let mut stats = KeyStats::default();
+        stats.record_hit(100);
+        stats.record_hit(200);
+        stats.record_hit(300);
+        assert!((stats.avg_reaction_ms() - 200.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn error_rate_with_no_attempts() {
+        let stats = KeyStats::default();
+        assert!((stats.error_rate() - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn error_rate_calculates_correctly() {
+        let mut stats = KeyStats::default();
+        stats.record_hit(100);
+        stats.record_hit(100);
+        stats.record_error(); // 1 error out of 3 attempts
+        assert!((stats.error_rate() - 1.0 / 3.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn not_proficient_with_few_samples() {
+        let mut stats = KeyStats::default();
+        for _ in 0..5 {
+            stats.record_hit(100);
+        }
+        assert!(!stats.is_proficient(400));
+    }
+
+    #[test]
+    fn proficient_with_enough_fast_samples() {
+        let mut stats = KeyStats::default();
+        for _ in 0..15 {
+            stats.record_hit(300);
+        }
+        assert!(stats.is_proficient(400));
+    }
+
+    #[test]
+    fn not_proficient_when_too_slow() {
+        let mut stats = KeyStats::default();
+        for _ in 0..15 {
+            stats.record_hit(500);
+        }
+        assert!(!stats.is_proficient(400));
+    }
+
+    #[test]
+    fn not_proficient_with_high_error_rate() {
+        let mut stats = KeyStats::default();
+        for _ in 0..8 {
+            stats.record_hit(300);
+        }
+        // Add errors to push error rate above 10%
+        for _ in 0..4 {
+            stats.record_error();
+        }
+        // 4 errors / 12 attempts = 33% error rate
+        assert!(!stats.is_proficient(400));
+    }
+
+    #[test]
+    fn reaction_times_capped_at_20() {
+        let mut stats = KeyStats::default();
+        for i in 0..30 {
+            stats.record_hit(i * 10);
+        }
+        assert_eq!(stats.reaction_times_ms.len(), 20);
+    }
+}

@@ -4,7 +4,7 @@ use std::time::Instant;
 use crate::engine::{generate_text, LetterScheduler};
 use crate::metrics::KeyStats;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorMode {
     /// Cursor advances even on wrong key; character is marked red.
     MoveOn,
@@ -66,6 +66,10 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
+        Self::new_with_opts(30, ErrorMode::MoveOn)
+    }
+
+    pub fn new_with_opts(target_wpm: u32, error_mode: ErrorMode) -> Self {
         let scheduler = LetterScheduler::new();
         let stats: HashMap<char, KeyStats> = HashMap::new();
         let text = generate_text(&scheduler.active_keys, &stats);
@@ -84,8 +88,8 @@ impl App {
             key_target_start: None,
             last_lesson: None,
             scheduler,
-            error_mode: ErrorMode::MoveOn,
-            target_wpm: 30,
+            error_mode,
+            target_wpm,
         }
     }
 
@@ -153,5 +157,47 @@ impl App {
 impl Default for App {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accuracy_is_100_with_no_errors() {
+        let mut app = App::new();
+        app.lesson_positions = 20;
+        app.lesson_errors = 0;
+        assert!((app.lesson_accuracy() - 100.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn accuracy_reflects_errors() {
+        let mut app = App::new();
+        app.lesson_positions = 10;
+        app.lesson_errors = 2;
+        // (10 - 2) / 10 * 100 = 80.0
+        assert!((app.lesson_accuracy() - 80.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn wpm_is_zero_before_lesson_starts() {
+        let app = App::new();
+        assert!((app.lesson_wpm() - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn target_speed_ms_calculation() {
+        let app = App::new_with_opts(30, ErrorMode::MoveOn);
+        // 12000 / 30 = 400
+        assert_eq!(app.target_speed_ms(), 400);
+    }
+
+    #[test]
+    fn new_with_opts_sets_values() {
+        let app = App::new_with_opts(50, ErrorMode::StopOnError);
+        assert_eq!(app.target_wpm, 50);
+        assert_eq!(app.error_mode, ErrorMode::StopOnError);
     }
 }
