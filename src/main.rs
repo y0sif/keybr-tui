@@ -1,4 +1,5 @@
 mod app;
+mod components;
 mod config;
 mod engine;
 mod events;
@@ -93,6 +94,7 @@ fn main() -> color_eyre::Result<()> {
     let mut terminal = tui::init()?;
 
     let mut app = App::new_with_state(target_wpm, error_mode, saved_stats);
+    app.fragment_length = config.fragment_length;
     let rx = setup_event_channel();
 
     while app.running {

@@ -3,6 +3,8 @@ use std::time::Instant;
 use crossterm::event::{KeyCode, KeyModifiers};
 
 use crate::app::{App, AppScreen, ErrorMode};
+use crate::components::menu::MENU_ITEMS;
+use crate::components::settings::SETTINGS_COUNT;
 use crate::events::AppEvent;
 
 /// Save stats to disk, logging errors to stderr without crashing.
@@ -32,12 +34,7 @@ pub fn update(app: &mut App, event: AppEvent) {
 fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
     use KeyCode::*;
 
-    // Global quit — Escape never conflicts with typing
-    if key.code == Esc {
-        auto_save_stats(app);
-        app.running = false;
-        return;
-    }
+    // Global: Ctrl+C always quits
     if key.code == Char('c') && key.modifiers == KeyModifiers::CONTROL {
         auto_save_stats(app);
         app.running = false;
@@ -45,20 +42,72 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
     }
 
     match app.screen {
-        AppScreen::LessonSummary => {
-            // Any key starts the next lesson
-            app.start_next_lesson();
-        }
-        AppScreen::Typing => {
-            handle_typing_key(app, key);
-        }
+        AppScreen::Menu => handle_menu_key(app, key),
+        AppScreen::Typing => handle_typing_key(app, key),
+        AppScreen::LessonSummary => handle_summary_key(app, key),
+        AppScreen::Progress => handle_progress_key(app, key),
+        AppScreen::Settings => handle_settings_key(app, key),
     }
 }
+
+// --- Menu screen ---
+
+fn handle_menu_key(app: &mut App, key: crossterm::event::KeyEvent) {
+    use KeyCode::*;
+
+    match key.code {
+        Up => {
+            if app.menu_selection > 0 {
+                app.menu_selection -= 1;
+            } else {
+                app.menu_selection = MENU_ITEMS.len() - 1;
+            }
+        }
+        Down => {
+            app.menu_selection = (app.menu_selection + 1) % MENU_ITEMS.len();
+        }
+        Enter => {
+            match app.menu_selection {
+                0 => {
+                    // Start Practice
+                    app.start_next_lesson();
+                }
+                1 => {
+                    // View Progress
+                    app.screen = AppScreen::Progress;
+                }
+                2 => {
+                    // Settings
+                    app.screen = AppScreen::Settings;
+                }
+                3 => {
+                    // Quit
+                    auto_save_stats(app);
+                    app.running = false;
+                }
+                _ => {}
+            }
+        }
+        Char('q') | Esc => {
+            auto_save_stats(app);
+            app.running = false;
+        }
+        _ => {}
+    }
+}
+
+// --- Typing screen ---
 
 fn handle_typing_key(app: &mut App, key: crossterm::event::KeyEvent) {
     use KeyCode::*;
 
     match key.code {
+        Esc => {
+            // Esc during typing goes to menu, not quit
+            auto_save_stats(app);
+            app.screen = AppScreen::Menu;
+        }
+
         // Toggle error mode
         Tab => {
             app.error_mode = match app.error_mode {
@@ -68,28 +117,13 @@ fn handle_typing_key(app: &mut App, key: crossterm::event::KeyEvent) {
             auto_save_config(app);
         }
 
-        // Adjust WPM goal
-        Char('+') | Char('=') => {
-            let new_wpm = (app.target_wpm() + 5).min(200);
-            app.set_target_wpm(new_wpm);
-            auto_save_config(app);
-        }
-        Char('-') => {
-            let new_wpm = app.target_wpm().saturating_sub(5).max(10);
-            app.set_target_wpm(new_wpm);
-            auto_save_config(app);
-        }
-
         // Backspace — move cursor back and clear error mark
         Backspace => {
             if app.cursor_pos > 0 {
                 app.cursor_pos -= 1;
-                // Remove error mark if backing over an error
                 app.error_positions.remove(&app.cursor_pos);
-                // Remove from first_attempt_correct/recovered since we're re-doing this position
                 app.first_attempt_correct.remove(&app.cursor_pos);
                 app.recovered_positions.remove(&app.cursor_pos);
-                // Reset the key target timer
                 app.key_target_start = Some(Instant::now());
             }
         }
@@ -125,23 +159,17 @@ fn handle_typed_char(app: &mut App, typed: char) {
         .unwrap_or(0);
 
     if typed == target {
-        // Correct keystroke
         let pos = app.cursor_pos;
 
-        // Track first-attempt vs recovery
         if app.ever_error_positions.contains(&pos) {
-            // This position had an error at some point — it's a recovery
             app.recovered_positions.insert(pos);
         } else {
-            // Never had an error — first-attempt correct
             app.first_attempt_correct.insert(pos);
         }
 
-        // Record stats for letters (not spaces), only for first-attempt correct
         if target != ' ' {
             if app.first_attempt_correct.contains(&pos) {
                 let stats = app.per_key_stats.entry(target).or_default();
-                // Validate reaction time: reject < 40ms or > 12000ms (keybr's bounds)
                 if (40..=12000).contains(&reaction_ms) {
                     stats.record_hit(reaction_ms);
                 }
@@ -152,26 +180,22 @@ fn handle_typed_char(app: &mut App, typed: char) {
         app.cursor_pos += 1;
         app.key_target_start = Some(Instant::now());
 
-        // Check if we've finished the current lesson
         if app.cursor_pos >= app.generated_text.chars().count() {
             app.finish_lesson();
             auto_save_stats(app);
         }
     } else {
-        // Wrong keystroke
         let pos = app.cursor_pos;
 
         if target != ' ' {
             let stats = app.per_key_stats.entry(target).or_default();
             stats.record_error();
-            // Only count first-try errors (don't double-count in StopOnError mode)
             if !app.error_positions.contains(&pos) {
                 app.lesson_positions += 1;
                 app.lesson_errors += 1;
             }
         }
 
-        // Mark as having had an error (permanent, survives backspace)
         app.ever_error_positions.insert(pos);
 
         match app.error_mode {
@@ -192,6 +216,109 @@ fn handle_typed_char(app: &mut App, typed: char) {
     }
 }
 
+// --- Lesson summary screen ---
+
+fn handle_summary_key(app: &mut App, key: crossterm::event::KeyEvent) {
+    use KeyCode::*;
+
+    match key.code {
+        Esc => {
+            // Esc on summary goes to menu
+            app.screen = AppScreen::Menu;
+        }
+        _ => {
+            // Any other key starts the next lesson
+            app.start_next_lesson();
+        }
+    }
+}
+
+// --- Progress screen ---
+
+fn handle_progress_key(app: &mut App, key: crossterm::event::KeyEvent) {
+    if key.code == KeyCode::Esc {
+        app.screen = AppScreen::Menu;
+    }
+}
+
+// --- Settings screen ---
+
+fn handle_settings_key(app: &mut App, key: crossterm::event::KeyEvent) {
+    use KeyCode::*;
+
+    match key.code {
+        Esc => {
+            auto_save_config(app);
+            app.screen = AppScreen::Menu;
+        }
+        Up => {
+            if app.settings_selection > 0 {
+                app.settings_selection -= 1;
+            } else {
+                app.settings_selection = SETTINGS_COUNT - 1;
+            }
+        }
+        Down => {
+            app.settings_selection = (app.settings_selection + 1) % SETTINGS_COUNT;
+        }
+        Left => {
+            match app.settings_selection {
+                0 => {
+                    // Decrease target WPM
+                    let new_wpm = app.target_wpm().saturating_sub(5).max(10);
+                    app.set_target_wpm(new_wpm);
+                }
+                1 => {
+                    // Toggle error mode
+                    app.error_mode = match app.error_mode {
+                        ErrorMode::ForgiveMistakes => ErrorMode::StopOnError,
+                        ErrorMode::StopOnError => ErrorMode::ForgiveMistakes,
+                    };
+                }
+                2 => {
+                    // Decrease fragment length
+                    app.fragment_length = app.fragment_length.saturating_sub(10).max(20);
+                }
+                _ => {}
+            }
+            auto_save_config(app);
+        }
+        Right => {
+            match app.settings_selection {
+                0 => {
+                    // Increase target WPM
+                    let new_wpm = (app.target_wpm() + 5).min(200);
+                    app.set_target_wpm(new_wpm);
+                }
+                1 => {
+                    // Toggle error mode
+                    app.error_mode = match app.error_mode {
+                        ErrorMode::ForgiveMistakes => ErrorMode::StopOnError,
+                        ErrorMode::StopOnError => ErrorMode::ForgiveMistakes,
+                    };
+                }
+                2 => {
+                    // Increase fragment length
+                    app.fragment_length = (app.fragment_length + 10).min(500);
+                }
+                _ => {}
+            }
+            auto_save_config(app);
+        }
+        Enter => {
+            // Toggle error mode on Enter when selected
+            if app.settings_selection == 1 {
+                app.error_mode = match app.error_mode {
+                    ErrorMode::ForgiveMistakes => ErrorMode::StopOnError,
+                    ErrorMode::StopOnError => ErrorMode::ForgiveMistakes,
+                };
+                auto_save_config(app);
+            }
+        }
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -208,6 +335,7 @@ mod tests {
 
     fn make_test_app(text: &str) -> App {
         let mut app = App::new();
+        app.screen = AppScreen::Typing;
         app.generated_text = text.to_string();
         app.cursor_pos = 0;
         app.error_positions.clear();
@@ -257,7 +385,6 @@ mod tests {
     #[test]
     fn correct_char_marks_first_attempt() {
         let mut app = make_test_app("ab");
-        // Type 'a' correctly
         update(&mut app, AppEvent::Key(make_key(KeyCode::Char('a'))));
         assert!(app.first_attempt_correct.contains(&0));
         assert!(!app.recovered_positions.contains(&0));
@@ -267,16 +394,13 @@ mod tests {
     fn error_then_backspace_then_correct_marks_recovered() {
         let mut app = make_test_app("abc");
         app.error_mode = ErrorMode::ForgiveMistakes;
-        // Type wrong char at position 0 — ForgiveMistakes advances cursor to 1
         update(&mut app, AppEvent::Key(make_key(KeyCode::Char('x'))));
         assert_eq!(app.cursor_pos, 1);
         assert!(app.error_positions.contains(&0));
         assert!(app.ever_error_positions.contains(&0));
-        // Backspace — goes back to position 0, clears error mark
         update(&mut app, AppEvent::Key(make_key(KeyCode::Backspace)));
         assert_eq!(app.cursor_pos, 0);
         assert!(!app.error_positions.contains(&0));
-        // Now type the correct char — should be marked as recovered
         update(&mut app, AppEvent::Key(make_key(KeyCode::Char('a'))));
         assert!(app.recovered_positions.contains(&0));
         assert!(!app.first_attempt_correct.contains(&0));
@@ -317,5 +441,142 @@ mod tests {
         assert_eq!(app.error_mode, ErrorMode::StopOnError);
         update(&mut app, AppEvent::Key(make_key(KeyCode::Tab)));
         assert_eq!(app.error_mode, ErrorMode::ForgiveMistakes);
+    }
+
+    #[test]
+    fn esc_during_typing_goes_to_menu() {
+        let mut app = make_test_app("abc");
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Esc)));
+        assert_eq!(app.screen, AppScreen::Menu);
+        assert!(app.running);
+    }
+
+    #[test]
+    fn esc_on_menu_quits() {
+        let mut app = App::new();
+        assert_eq!(app.screen, AppScreen::Menu);
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Esc)));
+        assert!(!app.running);
+    }
+
+    #[test]
+    fn q_on_menu_quits() {
+        let mut app = App::new();
+        assert_eq!(app.screen, AppScreen::Menu);
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Char('q'))));
+        assert!(!app.running);
+    }
+
+    #[test]
+    fn menu_navigation() {
+        let mut app = App::new();
+        assert_eq!(app.menu_selection, 0);
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Down)));
+        assert_eq!(app.menu_selection, 1);
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Down)));
+        assert_eq!(app.menu_selection, 2);
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Up)));
+        assert_eq!(app.menu_selection, 1);
+    }
+
+    #[test]
+    fn menu_wraps_around() {
+        let mut app = App::new();
+        assert_eq!(app.menu_selection, 0);
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Up)));
+        assert_eq!(app.menu_selection, MENU_ITEMS.len() - 1);
+    }
+
+    #[test]
+    fn menu_enter_starts_practice() {
+        let mut app = App::new();
+        app.menu_selection = 0;
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Enter)));
+        assert_eq!(app.screen, AppScreen::Typing);
+    }
+
+    #[test]
+    fn menu_enter_opens_progress() {
+        let mut app = App::new();
+        app.menu_selection = 1;
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Enter)));
+        assert_eq!(app.screen, AppScreen::Progress);
+    }
+
+    #[test]
+    fn menu_enter_opens_settings() {
+        let mut app = App::new();
+        app.menu_selection = 2;
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Enter)));
+        assert_eq!(app.screen, AppScreen::Settings);
+    }
+
+    #[test]
+    fn summary_esc_goes_to_menu() {
+        let mut app = make_test_app("a");
+        // Type the character to finish the lesson
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Char('a'))));
+        assert_eq!(app.screen, AppScreen::LessonSummary);
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Esc)));
+        assert_eq!(app.screen, AppScreen::Menu);
+    }
+
+    #[test]
+    fn summary_any_key_starts_next_lesson() {
+        let mut app = make_test_app("a");
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Char('a'))));
+        assert_eq!(app.screen, AppScreen::LessonSummary);
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Char(' '))));
+        assert_eq!(app.screen, AppScreen::Typing);
+    }
+
+    #[test]
+    fn progress_esc_goes_to_menu() {
+        let mut app = App::new();
+        app.screen = AppScreen::Progress;
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Esc)));
+        assert_eq!(app.screen, AppScreen::Menu);
+    }
+
+    #[test]
+    fn settings_esc_goes_to_menu() {
+        let mut app = App::new();
+        app.screen = AppScreen::Settings;
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Esc)));
+        assert_eq!(app.screen, AppScreen::Menu);
+    }
+
+    #[test]
+    fn settings_adjusts_wpm() {
+        let mut app = App::new();
+        app.screen = AppScreen::Settings;
+        app.settings_selection = 0;
+        let initial_wpm = app.target_wpm();
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Right)));
+        assert_eq!(app.target_wpm(), initial_wpm + 5);
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Left)));
+        assert_eq!(app.target_wpm(), initial_wpm);
+    }
+
+    #[test]
+    fn settings_toggles_error_mode() {
+        let mut app = App::new();
+        app.screen = AppScreen::Settings;
+        app.settings_selection = 1;
+        app.error_mode = ErrorMode::ForgiveMistakes;
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Right)));
+        assert_eq!(app.error_mode, ErrorMode::StopOnError);
+    }
+
+    #[test]
+    fn settings_adjusts_fragment_length() {
+        let mut app = App::new();
+        app.screen = AppScreen::Settings;
+        app.settings_selection = 2;
+        let initial = app.fragment_length;
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Right)));
+        assert_eq!(app.fragment_length, initial + 10);
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Left)));
+        assert_eq!(app.fragment_length, initial);
     }
 }

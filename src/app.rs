@@ -14,10 +14,13 @@ pub enum ErrorMode {
     ForgiveMistakes,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppScreen {
+    Menu,
     Typing,
     LessonSummary,
+    Progress,
+    Settings,
 }
 
 /// Results stored after a lesson completes.
@@ -77,6 +80,14 @@ pub struct App {
     /// Target typing speed in CPM. Internally everything uses CPM.
     /// Display as WPM = CPM / 5.
     pub target_cpm: f64,
+    /// Fragment length for text generation.
+    pub fragment_length: usize,
+
+    // --- Navigation state ---
+    /// Selected item index in the main menu.
+    pub menu_selection: usize,
+    /// Selected item index in the settings screen.
+    pub settings_selection: usize,
 }
 
 impl App {
@@ -133,7 +144,7 @@ impl App {
 
         App {
             running: true,
-            screen: AppScreen::Typing,
+            screen: AppScreen::Menu,
             generated_text: text,
             cursor_pos: 0,
             error_positions: HashSet::new(),
@@ -152,6 +163,9 @@ impl App {
             generator,
             error_mode,
             target_cpm,
+            fragment_length: 100,
+            menu_selection: 0,
+            settings_selection: 0,
         }
     }
 
@@ -235,7 +249,7 @@ impl App {
     /// Generates new text and returns to the typing screen.
     pub fn start_next_lesson(&mut self) {
         let filter = LetterFilter::new(&self.scheduler.active_keys, self.scheduler.focused_key);
-        self.generated_text = self.generator.generate_fragment(&filter, 100);
+        self.generated_text = self.generator.generate_fragment(&filter, self.fragment_length);
         self.cursor_pos = 0;
         self.error_positions.clear();
         self.first_attempt_correct.clear();
@@ -284,7 +298,7 @@ impl App {
                 ErrorMode::ForgiveMistakes => ErrorModeSerde::ForgiveMistakes,
                 ErrorMode::StopOnError => ErrorModeSerde::StopOnError,
             },
-            fragment_length: 100,
+            fragment_length: self.fragment_length,
         }
     }
 }
