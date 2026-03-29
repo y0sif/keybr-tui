@@ -1,9 +1,9 @@
 use ratatui::{
-    Frame,
     layout::{Constraint, Layout, Rect},
     style::{Color, Style},
     text::{Line, Span},
     widgets::Paragraph,
+    Frame,
 };
 
 use crate::app::{App, ErrorMode};
@@ -28,12 +28,13 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let total_chars = app.generated_text.chars().count();
     let progress_label = format!("{}/{} chars", app.cursor_pos, total_chars);
 
-    let left = Paragraph::new(Line::from(vec![
-        Span::styled(
-            format!(" {} | {} | {} | {}", lesson_label, wpm_label, acc_label, progress_label),
-            Style::default().fg(Color::DarkGray),
+    let left = Paragraph::new(Line::from(vec![Span::styled(
+        format!(
+            " {} | {} | {} | {}",
+            lesson_label, wpm_label, acc_label, progress_label
         ),
-    ]));
+        Style::default().fg(Color::DarkGray),
+    )]));
     frame.render_widget(left, columns[0]);
 
     // Center: focused key

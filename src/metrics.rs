@@ -32,9 +32,7 @@ impl KeyStats {
         }
 
         // Track best (historical minimum)
-        if self.best_filtered_time_ms == 0.0
-            || self.filtered_time_ms < self.best_filtered_time_ms
-        {
+        if self.best_filtered_time_ms == 0.0 || self.filtered_time_ms < self.best_filtered_time_ms {
             self.best_filtered_time_ms = self.filtered_time_ms;
         }
     }
@@ -181,7 +179,11 @@ mod tests {
         // If filtered time is 200ms, confidence = 342.86 / 200 ≈ 1.71
         stats.record_hit(200);
         let c = stats.confidence(175.0);
-        assert!(c > 1.0, "confidence should be > 1.0 for fast typing, got {}", c);
+        assert!(
+            c > 1.0,
+            "confidence should be > 1.0 for fast typing, got {}",
+            c
+        );
     }
 
     #[test]
@@ -190,7 +192,11 @@ mod tests {
         // If filtered time is 600ms, confidence = 342.86 / 600 ≈ 0.57
         stats.record_hit(600);
         let c = stats.confidence(175.0);
-        assert!(c < 1.0, "confidence should be < 1.0 for slow typing, got {}", c);
+        assert!(
+            c < 1.0,
+            "confidence should be < 1.0 for slow typing, got {}",
+            c
+        );
     }
 
     #[test]

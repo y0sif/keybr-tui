@@ -27,9 +27,7 @@ pub fn setup_event_channel() -> Receiver<AppEvent> {
         match event::read() {
             Ok(Event::Key(key)) => {
                 // Only process key press events, not release/repeat on some backends
-                if key.kind == KeyEventKind::Press
-                    && tx.send(AppEvent::Key(key)).is_err()
-                {
+                if key.kind == KeyEventKind::Press && tx.send(AppEvent::Key(key)).is_err() {
                     break;
                 }
             }

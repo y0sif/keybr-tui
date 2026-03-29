@@ -85,11 +85,7 @@ fn main() -> color_eyre::Result<()> {
     };
 
     // Load saved stats (unless --reset was used)
-    let saved_stats = if cli.reset {
-        None
-    } else {
-        SavedStats::load()
-    };
+    let saved_stats = if cli.reset { None } else { SavedStats::load() };
 
     let mut terminal = tui::init()?;
 

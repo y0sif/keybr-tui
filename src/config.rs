@@ -46,8 +46,7 @@ impl Default for Config {
 impl Config {
     /// Return the config file path, or `None` if the platform has no config dir.
     pub fn path() -> Option<PathBuf> {
-        ProjectDirs::from("", "", "keybr-tui")
-            .map(|dirs| dirs.config_dir().join("config.toml"))
+        ProjectDirs::from("", "", "keybr-tui").map(|dirs| dirs.config_dir().join("config.toml"))
     }
 
     /// Load config from disk. Returns defaults if the file doesn't exist or is

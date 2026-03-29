@@ -41,8 +41,7 @@ pub struct SavedStats {
 impl SavedStats {
     /// Return the stats file path, or `None` if the platform has no data dir.
     pub fn path() -> Option<PathBuf> {
-        ProjectDirs::from("", "", "keybr-tui")
-            .map(|dirs| dirs.data_dir().join("stats.json"))
+        ProjectDirs::from("", "", "keybr-tui").map(|dirs| dirs.data_dir().join("stats.json"))
     }
 
     /// Load stats from disk. Returns `None` if the file doesn't exist.

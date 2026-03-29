@@ -1,9 +1,9 @@
 use ratatui::{
-    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::Paragraph,
+    Frame,
 };
 
 use crate::app::{App, ErrorMode};
@@ -42,14 +42,18 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     } else {
         Style::default().fg(Color::DarkGray)
     };
-    let wpm_marker = if app.settings_selection == 0 { "> " } else { "  " };
+    let wpm_marker = if app.settings_selection == 0 {
+        "> "
+    } else {
+        "  "
+    };
     lines.push(Line::from(vec![
         Span::styled(format!("{}Target WPM         ", wpm_marker), wpm_style),
+        Span::styled(format!("[  {}  ]", app.target_wpm()), wpm_style),
         Span::styled(
-            format!("[  {}  ]", app.target_wpm()),
-            wpm_style,
+            "     Left/Right to adjust",
+            Style::default().fg(Color::DarkGray),
         ),
-        Span::styled("     Left/Right to adjust", Style::default().fg(Color::DarkGray)),
     ]));
 
     // Error Mode
@@ -60,18 +64,22 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     } else {
         Style::default().fg(Color::DarkGray)
     };
-    let mode_marker = if app.settings_selection == 1 { "> " } else { "  " };
+    let mode_marker = if app.settings_selection == 1 {
+        "> "
+    } else {
+        "  "
+    };
     let mode_label = match app.error_mode {
         ErrorMode::ForgiveMistakes => "Forgive Mistakes",
         ErrorMode::StopOnError => "Stop On Error",
     };
     lines.push(Line::from(vec![
         Span::styled(format!("{}Error Mode         ", mode_marker), mode_style),
+        Span::styled(format!("[  {}  ]", mode_label), mode_style),
         Span::styled(
-            format!("[  {}  ]", mode_label),
-            mode_style,
+            "     Left/Right to toggle",
+            Style::default().fg(Color::DarkGray),
         ),
-        Span::styled("     Left/Right to toggle", Style::default().fg(Color::DarkGray)),
     ]));
 
     // Fragment Length
@@ -82,14 +90,18 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     } else {
         Style::default().fg(Color::DarkGray)
     };
-    let frag_marker = if app.settings_selection == 2 { "> " } else { "  " };
+    let frag_marker = if app.settings_selection == 2 {
+        "> "
+    } else {
+        "  "
+    };
     lines.push(Line::from(vec![
         Span::styled(format!("{}Fragment Length     ", frag_marker), frag_style),
+        Span::styled(format!("[  {}  ]", app.fragment_length), frag_style),
         Span::styled(
-            format!("[  {}  ]", app.fragment_length),
-            frag_style,
+            "     Left/Right to adjust",
+            Style::default().fg(Color::DarkGray),
         ),
-        Span::styled("     Left/Right to adjust", Style::default().fg(Color::DarkGray)),
     ]));
 
     lines.push(Line::from(""));

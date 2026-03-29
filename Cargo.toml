@@ -1,6 +1,6 @@
 [package]
 name = "keybr-tui"
-version = "0.1.0-dev"
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT"
@@ -8,6 +8,7 @@ description = "A terminal typing trainer inspired by keybr.com with adaptive lea
 repository = "https://github.com/y0sif/keybr-tui"
 keywords = ["typing", "tui", "terminal", "keyboard", "trainer"]
 categories = ["command-line-utilities"]
+readme = "README.md"
 
 [dependencies]
 ratatui = "0.29"

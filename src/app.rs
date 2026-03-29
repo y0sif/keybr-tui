@@ -200,8 +200,7 @@ impl App {
         if self.lesson_positions == 0 {
             return 100.0;
         }
-        ((self.lesson_positions - self.lesson_errors) as f64 / self.lesson_positions as f64)
-            * 100.0
+        ((self.lesson_positions - self.lesson_errors) as f64 / self.lesson_positions as f64) * 100.0
     }
 
     /// Called when the user finishes typing all chars in the current batch.
@@ -249,7 +248,9 @@ impl App {
     /// Generates new text and returns to the typing screen.
     pub fn start_next_lesson(&mut self) {
         let filter = LetterFilter::new(&self.scheduler.active_keys, self.scheduler.focused_key);
-        self.generated_text = self.generator.generate_fragment(&filter, self.fragment_length);
+        self.generated_text = self
+            .generator
+            .generate_fragment(&filter, self.fragment_length);
         self.cursor_pos = 0;
         self.error_positions.clear();
         self.first_attempt_correct.clear();

@@ -102,9 +102,9 @@ impl WordGenerator {
 
             let prev = word.chars().last().unwrap();
             match self.sample_next(prev, filter, word.len()) {
-                Some(' ') => break,   // space = end of word
+                Some(' ') => break, // space = end of word
                 Some(c) => word.push(c),
-                None => return None,   // dead end, retry
+                None => return None, // dead end, retry
             }
         }
 
@@ -165,12 +165,7 @@ impl WordGenerator {
     ///
     /// Returns None if no valid candidates exist (dead end).
     /// Returns Some(' ') to signal end of word.
-    fn sample_next(
-        &mut self,
-        prev: char,
-        filter: &LetterFilter,
-        word_len: usize,
-    ) -> Option<char> {
+    fn sample_next(&mut self, prev: char, filter: &LetterFilter, word_len: usize) -> Option<char> {
         let row = TransitionTable::get_row(prev);
 
         // Build filtered candidates: (char, adjusted_frequency)

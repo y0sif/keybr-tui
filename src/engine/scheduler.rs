@@ -10,7 +10,7 @@ pub const UNLOCK_ORDER: &[char] = &[
     's', 'r', 'h', 'l', 'd', 'c', // next unlocks
     'u', 'm', 'f', 'p', 'g', 'w', // medium frequency
     'y', 'b', 'v', 'k', 'x', 'j', // low frequency
-    'q', 'z',                      // rare
+    'q', 'z', // rare
 ];
 
 const STARTER_COUNT: usize = 6;
@@ -74,7 +74,6 @@ impl LetterScheduler {
             .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(key, _)| key);
     }
-
 }
 
 impl Default for LetterScheduler {

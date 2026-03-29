@@ -3,9 +3,9 @@ use std::panic;
 
 use crossterm::{
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{Terminal, backend::CrosstermBackend};
+use ratatui::{backend::CrosstermBackend, Terminal};
 
 /// Initialize the terminal: enable raw mode, enter alternate screen.
 pub fn init() -> color_eyre::Result<Terminal<CrosstermBackend<Stdout>>> {

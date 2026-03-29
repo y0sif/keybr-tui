@@ -1,9 +1,9 @@
 use ratatui::{
-    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::Paragraph,
+    Frame,
 };
 
 use crate::app::App;
@@ -37,14 +37,12 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     for (i, &item) in MENU_ITEMS.iter().enumerate() {
         let is_selected = i == app.menu_selection;
         if is_selected {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("  > {}", item),
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ]));
+            lines.push(Line::from(vec![Span::styled(
+                format!("  > {}", item),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            )]));
         } else {
             lines.push(Line::from(vec![Span::styled(
                 format!("    {}", item),

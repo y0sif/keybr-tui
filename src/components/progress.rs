@@ -1,9 +1,9 @@
 use ratatui::{
-    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::Paragraph,
+    Frame,
 };
 
 use crate::app::App;
@@ -37,14 +37,12 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
 
     // Header
-    lines.push(Line::from(vec![
-        Span::styled(
-            "  Key   Confidence   Speed(ms)   Errors       Status",
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        ),
-    ]));
+    lines.push(Line::from(vec![Span::styled(
+        "  Key   Confidence   Speed(ms)   Errors       Status",
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
+    )]));
     lines.push(Line::from(Span::styled(
         "  ---   ----------   ---------   ------       ------",
         Style::default().fg(Color::DarkGray),
@@ -101,7 +99,11 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
                 "   {}     ----        -----       --------     {}{}",
                 key, status, focus_marker
             );
-            let color = if is_active { Color::White } else { Color::DarkGray };
+            let color = if is_active {
+                Color::White
+            } else {
+                Color::DarkGray
+            };
             let mut style = Style::default().fg(color);
             if is_focused {
                 style = style.add_modifier(Modifier::BOLD);
