@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
-use crate::engine::{generate_text, LetterScheduler};
+use crate::engine::{LetterFilter, LetterScheduler, WordGenerator};
 use crate::metrics::KeyStats;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,22 +57,31 @@ pub struct App {
 
     // --- Engine ---
     pub scheduler: LetterScheduler,
+    pub generator: WordGenerator,
 
     // --- Settings (live-adjustable) ---
     pub error_mode: ErrorMode,
-    /// Target typing speed in WPM. Used as the proficiency unlock threshold.
-    pub target_wpm: u32,
+    /// Target typing speed in CPM. Internally everything uses CPM.
+    /// Display as WPM = CPM / 5.
+    pub target_cpm: f64,
 }
 
 impl App {
     pub fn new() -> Self {
-        Self::new_with_opts(30, ErrorMode::MoveOn)
+        Self::new_with_opts(35, ErrorMode::MoveOn) // 35 WPM = 175 CPM
     }
 
     pub fn new_with_opts(target_wpm: u32, error_mode: ErrorMode) -> Self {
-        let scheduler = LetterScheduler::new();
+        let mut scheduler = LetterScheduler::new();
         let stats: HashMap<char, KeyStats> = HashMap::new();
-        let text = generate_text(&scheduler.active_keys, &stats);
+        let target_cpm = target_wpm as f64 * 5.0;
+
+        // Initial scheduler update to set focused key
+        scheduler.update(&stats, target_cpm);
+
+        let filter = LetterFilter::new(&scheduler.active_keys, scheduler.focused_key);
+        let mut generator = WordGenerator::new();
+        let text = generator.generate_fragment(&filter, 100);
 
         App {
             running: true,
@@ -88,15 +97,20 @@ impl App {
             key_target_start: None,
             last_lesson: None,
             scheduler,
+            generator,
             error_mode,
-            target_wpm,
+            target_cpm,
         }
     }
 
-    /// Convert the WPM goal to a per-key reaction time threshold in ms.
-    /// At W WPM, each character takes 12000/W milliseconds on average.
-    pub fn target_speed_ms(&self) -> u64 {
-        12000 / self.target_wpm as u64
+    /// Target WPM for display (WPM = CPM / 5).
+    pub fn target_wpm(&self) -> u32 {
+        (self.target_cpm / 5.0).round() as u32
+    }
+
+    /// Set the target via WPM (converts to CPM internally).
+    pub fn set_target_wpm(&mut self, wpm: u32) {
+        self.target_cpm = wpm as f64 * 5.0;
     }
 
     /// WPM for the current lesson so far (live, used only internally).
@@ -122,13 +136,21 @@ impl App {
     }
 
     /// Called when the user finishes typing all chars in the current batch.
-    /// Saves lesson results, checks for unlocks, transitions to summary screen.
+    /// Saves lesson results, runs scheduler, transitions to summary screen.
     pub fn finish_lesson(&mut self) {
         let wpm = self.lesson_wpm();
         let accuracy = self.lesson_accuracy();
-        let newly_unlocked = self
-            .scheduler
-            .try_unlock(&self.per_key_stats, self.target_speed_ms());
+
+        let old_count = self.scheduler.active_keys.len();
+
+        // Update scheduler with current stats
+        self.scheduler.update(&self.per_key_stats, self.target_cpm);
+
+        let newly_unlocked = if self.scheduler.active_keys.len() > old_count {
+            Some(*self.scheduler.active_keys.last().unwrap())
+        } else {
+            None
+        };
 
         self.last_lesson = Some(LessonResult {
             wpm,
@@ -141,8 +163,8 @@ impl App {
     /// Called when the user dismisses the lesson summary (any key).
     /// Generates new text and returns to the typing screen.
     pub fn start_next_lesson(&mut self) {
-        self.generated_text =
-            generate_text(&self.scheduler.active_keys, &self.per_key_stats);
+        let filter = LetterFilter::new(&self.scheduler.active_keys, self.scheduler.focused_key);
+        self.generated_text = self.generator.generate_fragment(&filter, 100);
         self.cursor_pos = 0;
         self.error_positions.clear();
         self.key_target_start = None;
@@ -188,16 +210,23 @@ mod tests {
     }
 
     #[test]
-    fn target_speed_ms_calculation() {
-        let app = App::new_with_opts(30, ErrorMode::MoveOn);
-        // 12000 / 30 = 400
-        assert_eq!(app.target_speed_ms(), 400);
+    fn target_wpm_conversion() {
+        let app = App::new_with_opts(35, ErrorMode::MoveOn);
+        assert_eq!(app.target_wpm(), 35);
+        assert!((app.target_cpm - 175.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn new_with_opts_sets_values() {
         let app = App::new_with_opts(50, ErrorMode::StopOnError);
-        assert_eq!(app.target_wpm, 50);
+        assert_eq!(app.target_wpm(), 50);
         assert_eq!(app.error_mode, ErrorMode::StopOnError);
+    }
+
+    #[test]
+    fn default_target_is_35_wpm() {
+        let app = App::new();
+        assert_eq!(app.target_wpm(), 35);
+        assert!((app.target_cpm - 175.0).abs() < f64::EPSILON);
     }
 }

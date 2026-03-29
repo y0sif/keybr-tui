@@ -5,7 +5,7 @@ use crate::metrics::KeyStats;
 /// Letters ordered from most to least frequent in English.
 /// This is the unlock order — the user starts with the first 6 and
 /// progressively gains access to more as they improve.
-const UNLOCK_ORDER: &[char] = &[
+pub const UNLOCK_ORDER: &[char] = &[
     'e', 't', 'a', 'o', 'i', 'n', // starter set
     's', 'r', 'h', 'l', 'd', 'c', // next unlocks
     'u', 'm', 'f', 'p', 'g', 'w', // medium frequency
@@ -18,6 +18,8 @@ const STARTER_COUNT: usize = 6;
 pub struct LetterScheduler {
     pub active_keys: Vec<char>,
     unlock_index: usize, // index of next letter to potentially unlock
+    /// The weakest included key (lowest confidence). Must appear in every word.
+    pub focused_key: Option<char>,
 }
 
 impl LetterScheduler {
@@ -26,35 +28,45 @@ impl LetterScheduler {
         LetterScheduler {
             active_keys,
             unlock_index: STARTER_COUNT,
+            focused_key: None,
         }
     }
 
-    /// Check if all active keys meet proficiency. If so, unlock the next letter.
-    /// Returns the newly unlocked letter, or None if no unlock happened.
-    pub fn try_unlock(
-        &mut self,
-        stats: &HashMap<char, KeyStats>,
-        target_ms: u64,
-    ) -> Option<char> {
-        if self.unlock_index >= UNLOCK_ORDER.len() {
-            return None; // all letters unlocked
-        }
-
-        let all_proficient = self.active_keys.iter().all(|key| {
+    /// Update which keys are included based on current confidence levels.
+    ///
+    /// - Minimum 6 keys always included
+    /// - A key with best confidence >= 1.0 stays included
+    /// - New key unlocks only when ALL included keys have confidence >= 1.0
+    /// - Focused key = included key with lowest confidence
+    pub fn update(&mut self, stats: &HashMap<char, KeyStats>, target_cpm: f64) {
+        // Check if all active keys are learned (confidence >= 1.0)
+        let all_learned = self.active_keys.iter().all(|key| {
             stats
                 .get(key)
-                .map(|s| s.is_proficient(target_ms))
+                .map(|s| s.confidence(target_cpm) >= 1.0)
                 .unwrap_or(false)
         });
 
-        if all_proficient {
+        // Unlock next key if all current keys are learned
+        if all_learned && self.unlock_index < UNLOCK_ORDER.len() {
             let next = UNLOCK_ORDER[self.unlock_index];
             self.active_keys.push(next);
             self.unlock_index += 1;
-            Some(next)
-        } else {
-            None
         }
+
+        // Find the focused key: active key with lowest confidence
+        self.focused_key = self
+            .active_keys
+            .iter()
+            .map(|&key| {
+                let conf = stats
+                    .get(&key)
+                    .map(|s| s.confidence(target_cpm))
+                    .unwrap_or(0.0);
+                (key, conf)
+            })
+            .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(key, _)| key);
     }
 
 }
@@ -69,11 +81,24 @@ impl Default for LetterScheduler {
 mod tests {
     use super::*;
 
-    fn make_proficient_stats(target_ms: u64) -> KeyStats {
+    fn make_learned_stats(target_cpm: f64) -> KeyStats {
+        // Create stats where confidence >= 1.0
+        // confidence = speed_to_time(cpm) / filtered_time
+        // speed_to_time(175) ≈ 342.86
+        // So filtered_time must be <= 342.86 for confidence >= 1.0
         let mut stats = KeyStats::default();
-        // Need at least 10 samples with avg <= target_ms and error_rate < 0.10
+        let fast_time = 200u64; // 200ms is well under 342ms
         for _ in 0..15 {
-            stats.record_hit(target_ms - 10);
+            stats.record_hit(fast_time);
+        }
+        let _ = target_cpm;
+        stats
+    }
+
+    fn make_slow_stats() -> KeyStats {
+        let mut stats = KeyStats::default();
+        for _ in 0..15 {
+            stats.record_hit(600); // 600ms — slow
         }
         stats
     }
@@ -86,53 +111,89 @@ mod tests {
     }
 
     #[test]
-    fn no_unlock_without_proficiency() {
+    fn no_unlock_without_stats() {
         let mut sched = LetterScheduler::new();
         let stats = HashMap::new();
-        let result = sched.try_unlock(&stats, 400);
-        assert!(result.is_none());
+        sched.update(&stats, 175.0);
         assert_eq!(sched.active_keys.len(), 6);
     }
 
     #[test]
-    fn unlocks_next_letter_when_all_proficient() {
+    fn unlocks_next_letter_when_all_learned() {
         let mut sched = LetterScheduler::new();
-        let target_ms = 400;
+        let target_cpm = 175.0;
         let mut stats = HashMap::new();
 
-        // Make all 6 starter keys proficient
         for &key in &['e', 't', 'a', 'o', 'i', 'n'] {
-            stats.insert(key, make_proficient_stats(target_ms));
+            stats.insert(key, make_learned_stats(target_cpm));
         }
 
-        let unlocked = sched.try_unlock(&stats, target_ms);
-        assert_eq!(unlocked, Some('s'));
+        sched.update(&stats, target_cpm);
         assert_eq!(sched.active_keys.len(), 7);
         assert!(sched.active_keys.contains(&'s'));
     }
 
     #[test]
-    fn sequential_unlocks() {
+    fn focused_key_is_weakest() {
         let mut sched = LetterScheduler::new();
-        let target_ms = 400;
+        let target_cpm = 175.0;
         let mut stats = HashMap::new();
 
-        // Make all starter keys proficient
+        // Make all keys learned except 'n'
+        for &key in &['e', 't', 'a', 'o', 'i'] {
+            stats.insert(key, make_learned_stats(target_cpm));
+        }
+        stats.insert('n', make_slow_stats());
+
+        sched.update(&stats, target_cpm);
+        assert_eq!(sched.focused_key, Some('n'));
+    }
+
+    #[test]
+    fn focused_key_is_unpracticed_key() {
+        let mut sched = LetterScheduler::new();
+        let target_cpm = 175.0;
+        let mut stats = HashMap::new();
+
+        // Only practice some keys — unpracticed ones have confidence 0.0
+        for &key in &['e', 't', 'a'] {
+            stats.insert(key, make_learned_stats(target_cpm));
+        }
+        // 'o', 'i', 'n' have no stats → confidence 0.0
+
+        sched.update(&stats, target_cpm);
+        // Focused should be one of the unpracticed keys
+        assert!(sched.focused_key.is_some());
+        let focused = sched.focused_key.unwrap();
+        assert!(
+            ['o', 'i', 'n'].contains(&focused),
+            "focused key should be an unpracticed key, got '{}'",
+            focused
+        );
+    }
+
+    #[test]
+    fn sequential_unlocks() {
+        let mut sched = LetterScheduler::new();
+        let target_cpm = 175.0;
+        let mut stats = HashMap::new();
+
+        // Make all starter keys learned
         for &key in &['e', 't', 'a', 'o', 'i', 'n'] {
-            stats.insert(key, make_proficient_stats(target_ms));
+            stats.insert(key, make_learned_stats(target_cpm));
         }
 
-        // First unlock: 's'
-        let first = sched.try_unlock(&stats, target_ms);
-        assert_eq!(first, Some('s'));
+        sched.update(&stats, target_cpm);
+        assert!(sched.active_keys.contains(&'s'));
 
-        // Without making 's' proficient, no further unlock
-        let none = sched.try_unlock(&stats, target_ms);
-        assert!(none.is_none());
+        // Without making 's' learned, no further unlock
+        sched.update(&stats, target_cpm);
+        assert_eq!(sched.active_keys.len(), 7);
 
-        // Make 's' proficient too
-        stats.insert('s', make_proficient_stats(target_ms));
-        let second = sched.try_unlock(&stats, target_ms);
-        assert_eq!(second, Some('r'));
+        // Make 's' learned too
+        stats.insert('s', make_learned_stats(target_cpm));
+        sched.update(&stats, target_cpm);
+        assert_eq!(sched.active_keys.len(), 8);
+        assert!(sched.active_keys.contains(&'r'));
     }
 }

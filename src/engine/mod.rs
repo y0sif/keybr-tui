@@ -1,6 +1,9 @@
-mod phonetics;
-pub mod scheduler;
+pub mod confidence;
+pub mod filter;
 pub mod generator;
+pub mod scheduler;
+pub mod transition;
 
+pub use filter::LetterFilter;
+pub use generator::WordGenerator;
 pub use scheduler::LetterScheduler;
-pub use generator::generate_text;

@@ -7,15 +7,7 @@ use ratatui::{
 };
 
 use crate::app::{App, AppScreen, ErrorMode};
-
-/// All letters in unlock order (matches scheduler::UNLOCK_ORDER).
-const UNLOCK_ORDER: &[char] = &[
-    'e', 't', 'a', 'o', 'i', 'n',
-    's', 'r', 'h', 'l', 'd', 'c',
-    'u', 'm', 'f', 'p', 'g', 'w',
-    'y', 'b', 'v', 'k', 'x', 'j',
-    'q', 'z',
-];
+use crate::engine::scheduler::UNLOCK_ORDER;
 
 pub fn view(app: &App, frame: &mut Frame) {
     match app.screen {
@@ -24,7 +16,7 @@ pub fn view(app: &App, frame: &mut Frame) {
     }
 }
 
-// ─── Typing screen ───────────────────────────────────────────────────────────
+// --- Typing screen -------------------------------------------------------
 
 fn render_typing_screen(app: &App, frame: &mut Frame) {
     let area = frame.area();
@@ -43,7 +35,7 @@ fn render_typing_screen(app: &App, frame: &mut Frame) {
     render_stats(app, frame, chunks[2]);
 }
 
-// ─── Key bar (top) ───────────────────────────────────────────────────────────
+// --- Key bar (top) -------------------------------------------------------
 
 fn render_key_bar(app: &App, frame: &mut Frame, area: Rect) {
     let active_set: std::collections::HashSet<char> =
@@ -60,18 +52,25 @@ fn render_key_bar(app: &App, frame: &mut Frame, area: Rect) {
         // Insert separator between active and locked sections
         if !is_active && !past_active {
             past_active = true;
-            spans.push(Span::styled(" │ ", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(" | ", Style::default().fg(Color::DarkGray)));
         } else {
             spans.push(Span::styled(" ", Style::default()));
         }
 
         let style = if is_active {
-            let is_proficient = app
+            let is_focused = app.scheduler.focused_key == Some(key);
+            let conf = app
                 .per_key_stats
                 .get(&key)
-                .map(|s| s.is_proficient(app.target_speed_ms()))
-                .unwrap_or(false);
-            if is_proficient {
+                .map(|s| s.confidence(app.target_cpm))
+                .unwrap_or(0.0);
+
+            if is_focused {
+                // Focused key: highlighted
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+            } else if conf >= 1.0 {
                 Style::default().fg(Color::Green)
             } else {
                 Style::default().fg(Color::White)
@@ -87,7 +86,7 @@ fn render_key_bar(app: &App, frame: &mut Frame, area: Rect) {
     frame.render_widget(para, area);
 }
 
-// ─── Typing area (middle) ────────────────────────────────────────────────────
+// --- Typing area (middle) ------------------------------------------------
 
 fn render_typing_area(app: &App, frame: &mut Frame, area: Rect) {
     let spans = build_spans(app);
@@ -127,7 +126,7 @@ fn build_spans(app: &App) -> Vec<Span<'static>> {
     spans
 }
 
-// ─── Stats bar (bottom) ──────────────────────────────────────────────────────
+// --- Stats bar (bottom) --------------------------------------------------
 
 fn render_stats(app: &App, frame: &mut Frame, area: Rect) {
     let mode_label = match app.error_mode {
@@ -135,15 +134,20 @@ fn render_stats(app: &App, frame: &mut Frame, area: Rect) {
         ErrorMode::StopOnError => "stop",
     };
 
+    let focused_label = match app.scheduler.focused_key {
+        Some(k) => format!("focus: {}", k),
+        None => "focus: -".to_string(),
+    };
+
     let stats_text = if let Some(last) = &app.last_lesson {
         format!(
-            " last lesson: {:.0} wpm  {:.0}% acc   goal: {} wpm [±5 -/+]   mode: {} [tab]   esc: quit",
-            last.wpm, last.accuracy, app.target_wpm, mode_label
+            " last: {:.0} wpm {:.0}%   goal: {} wpm [+/-]   {}   mode: {} [tab]   esc: quit",
+            last.wpm, last.accuracy, app.target_wpm(), focused_label, mode_label
         )
     } else {
         format!(
-            " no lesson yet   goal: {} wpm [±5 -/+]   mode: {} [tab]   esc: quit",
-            app.target_wpm, mode_label
+            " no lesson yet   goal: {} wpm [+/-]   {}   mode: {} [tab]   esc: quit",
+            app.target_wpm(), focused_label, mode_label
         )
     };
 
@@ -154,7 +158,7 @@ fn render_stats(app: &App, frame: &mut Frame, area: Rect) {
     frame.render_widget(para, area);
 }
 
-// ─── Lesson summary screen ───────────────────────────────────────────────────
+// --- Lesson summary screen -----------------------------------------------
 
 fn render_summary_screen(app: &App, frame: &mut Frame) {
     let area = frame.area();
@@ -179,7 +183,7 @@ fn render_summary_screen(app: &App, frame: &mut Frame) {
     let mut lines: Vec<Line> = Vec::new();
 
     lines.push(Line::from(Span::styled(
-        "── lesson complete ──",
+        "-- lesson complete --",
         Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
     )));
     lines.push(Line::from(""));
@@ -236,7 +240,7 @@ fn accuracy_style(acc: f64) -> Style {
     }
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// --- Helpers -------------------------------------------------------------
 
 fn centered_rect(area: Rect, max_width_pct: u16) -> Rect {
     let h_split = Layout::default()

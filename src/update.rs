@@ -51,10 +51,12 @@ fn handle_typing_key(app: &mut App, key: crossterm::event::KeyEvent) {
 
         // Adjust WPM goal
         Char('+') | Char('=') => {
-            app.target_wpm = (app.target_wpm + 5).min(200);
+            let new_wpm = (app.target_wpm() + 5).min(200);
+            app.set_target_wpm(new_wpm);
         }
         Char('-') => {
-            app.target_wpm = app.target_wpm.saturating_sub(5).max(10);
+            let new_wpm = app.target_wpm().saturating_sub(5).max(10);
+            app.set_target_wpm(new_wpm);
         }
 
         // Typing input — includes space

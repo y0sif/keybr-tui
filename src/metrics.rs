@@ -1,3 +1,5 @@
+use crate::engine::confidence;
+
 /// Per-key performance data used by the adaptive scheduler.
 #[derive(Default, Clone)]
 pub struct KeyStats {
@@ -5,14 +7,35 @@ pub struct KeyStats {
     pub errors: u32,
     /// Most recent reaction times in ms (capped at last 20 samples).
     pub reaction_times_ms: Vec<u64>,
+    /// Exponentially smoothed reaction time (alpha = 0.1).
+    pub filtered_time_ms: f64,
+    /// Historical minimum of the filtered time.
+    pub best_filtered_time_ms: f64,
 }
 
 impl KeyStats {
+    const ALPHA: f64 = 0.1;
+
     pub fn record_hit(&mut self, reaction_ms: u64) {
         self.attempts += 1;
         self.reaction_times_ms.push(reaction_ms);
         if self.reaction_times_ms.len() > 20 {
             self.reaction_times_ms.remove(0);
+        }
+
+        // Exponential smoothing
+        if self.filtered_time_ms == 0.0 {
+            self.filtered_time_ms = reaction_ms as f64;
+        } else {
+            self.filtered_time_ms =
+                Self::ALPHA * reaction_ms as f64 + (1.0 - Self::ALPHA) * self.filtered_time_ms;
+        }
+
+        // Track best (historical minimum)
+        if self.best_filtered_time_ms == 0.0
+            || self.filtered_time_ms < self.best_filtered_time_ms
+        {
+            self.best_filtered_time_ms = self.filtered_time_ms;
         }
     }
 
@@ -23,6 +46,7 @@ impl KeyStats {
 
     /// Average reaction time over the stored sample window.
     /// Returns f64::MAX if no samples yet.
+    #[allow(dead_code)]
     pub fn avg_reaction_ms(&self) -> f64 {
         if self.reaction_times_ms.is_empty() {
             return f64::MAX;
@@ -31,7 +55,8 @@ impl KeyStats {
         sum as f64 / self.reaction_times_ms.len() as f64
     }
 
-    /// Error rate over all attempts (0.0 – 1.0).
+    /// Error rate over all attempts (0.0 - 1.0).
+    #[allow(dead_code)]
     pub fn error_rate(&self) -> f64 {
         if self.attempts == 0 {
             return 0.0;
@@ -39,14 +64,20 @@ impl KeyStats {
         self.errors as f64 / self.attempts as f64
     }
 
-    /// Whether this key has met the proficiency threshold.
-    /// `target_ms`: maximum allowed average reaction time.
-    pub fn is_proficient(&self, target_ms: u64) -> bool {
-        // Need at least 10 samples before declaring proficiency
-        if self.reaction_times_ms.len() < 10 {
-            return false;
+    /// Confidence for this key given a target CPM.
+    /// confidence >= 1.0 means the key is "learned".
+    pub fn confidence(&self, target_cpm: f64) -> f64 {
+        if self.filtered_time_ms == 0.0 {
+            return 0.0;
         }
-        self.avg_reaction_ms() <= target_ms as f64 && self.error_rate() < 0.10
+        confidence::confidence(target_cpm, self.filtered_time_ms)
+    }
+
+    /// Whether this key has met the proficiency threshold.
+    /// Uses the confidence system: confidence >= 1.0 means learned.
+    #[allow(dead_code)]
+    pub fn is_proficient(&self, target_cpm: f64) -> bool {
+        self.confidence(target_cpm) >= 1.0
     }
 }
 
@@ -60,6 +91,8 @@ mod tests {
         assert_eq!(stats.attempts, 0);
         assert_eq!(stats.errors, 0);
         assert!(stats.reaction_times_ms.is_empty());
+        assert!((stats.filtered_time_ms - 0.0).abs() < f64::EPSILON);
+        assert!((stats.best_filtered_time_ms - 0.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -93,52 +126,81 @@ mod tests {
     }
 
     #[test]
-    fn not_proficient_with_few_samples() {
-        let mut stats = KeyStats::default();
-        for _ in 0..5 {
-            stats.record_hit(100);
-        }
-        assert!(!stats.is_proficient(400));
-    }
-
-    #[test]
-    fn proficient_with_enough_fast_samples() {
-        let mut stats = KeyStats::default();
-        for _ in 0..15 {
-            stats.record_hit(300);
-        }
-        assert!(stats.is_proficient(400));
-    }
-
-    #[test]
-    fn not_proficient_when_too_slow() {
-        let mut stats = KeyStats::default();
-        for _ in 0..15 {
-            stats.record_hit(500);
-        }
-        assert!(!stats.is_proficient(400));
-    }
-
-    #[test]
-    fn not_proficient_with_high_error_rate() {
-        let mut stats = KeyStats::default();
-        for _ in 0..8 {
-            stats.record_hit(300);
-        }
-        // Add errors to push error rate above 10%
-        for _ in 0..4 {
-            stats.record_error();
-        }
-        // 4 errors / 12 attempts = 33% error rate
-        assert!(!stats.is_proficient(400));
-    }
-
-    #[test]
     fn reaction_times_capped_at_20() {
         let mut stats = KeyStats::default();
         for i in 0..30 {
             stats.record_hit(i * 10);
         }
         assert_eq!(stats.reaction_times_ms.len(), 20);
+    }
+
+    // --- New tests for exponential smoothing and confidence ---
+
+    #[test]
+    fn first_hit_sets_filtered_time() {
+        let mut stats = KeyStats::default();
+        stats.record_hit(400);
+        assert!((stats.filtered_time_ms - 400.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn exponential_smoothing_applies() {
+        let mut stats = KeyStats::default();
+        stats.record_hit(400);
+        // filtered = 400.0
+        stats.record_hit(200);
+        // filtered = 0.1 * 200 + 0.9 * 400 = 20 + 360 = 380
+        assert!((stats.filtered_time_ms - 380.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn best_filtered_time_tracks_minimum() {
+        let mut stats = KeyStats::default();
+        stats.record_hit(400);
+        assert!((stats.best_filtered_time_ms - 400.0).abs() < f64::EPSILON);
+
+        // Keep hitting with fast times — filtered decreases
+        for _ in 0..50 {
+            stats.record_hit(200);
+        }
+        // filtered_time should be close to 200 after many samples
+        assert!(stats.best_filtered_time_ms <= stats.filtered_time_ms + 0.01);
+        assert!(stats.best_filtered_time_ms < 400.0);
+    }
+
+    #[test]
+    fn confidence_zero_without_data() {
+        let stats = KeyStats::default();
+        assert!((stats.confidence(175.0) - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn confidence_increases_with_speed() {
+        let mut stats = KeyStats::default();
+        // Target 175 CPM → target time ≈ 342.86ms
+        // If filtered time is 200ms, confidence = 342.86 / 200 ≈ 1.71
+        stats.record_hit(200);
+        let c = stats.confidence(175.0);
+        assert!(c > 1.0, "confidence should be > 1.0 for fast typing, got {}", c);
+    }
+
+    #[test]
+    fn confidence_below_one_when_slow() {
+        let mut stats = KeyStats::default();
+        // If filtered time is 600ms, confidence = 342.86 / 600 ≈ 0.57
+        stats.record_hit(600);
+        let c = stats.confidence(175.0);
+        assert!(c < 1.0, "confidence should be < 1.0 for slow typing, got {}", c);
+    }
+
+    #[test]
+    fn is_proficient_uses_confidence() {
+        let mut stats = KeyStats::default();
+        stats.record_hit(200); // Fast — confidence > 1.0
+        assert!(stats.is_proficient(175.0));
+
+        let mut slow_stats = KeyStats::default();
+        slow_stats.record_hit(600); // Slow — confidence < 1.0
+        assert!(!slow_stats.is_proficient(175.0));
     }
 }
