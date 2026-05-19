@@ -91,6 +91,8 @@ fn main() -> color_eyre::Result<()> {
 
     let mut app = App::new_with_state(target_wpm, error_mode, saved_stats);
     app.fragment_length = config.fragment_length;
+    app.natural_words = config.natural_words;
+    app.generator.set_natural_words(app.natural_words);
     let rx = setup_event_channel();
 
     while app.running {

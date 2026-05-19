@@ -38,29 +38,31 @@ impl LetterScheduler {
         self.unlock_index = self.active_keys.len();
     }
 
-    /// Update which keys are included based on current confidence levels.
+    /// Update which keys are included based on confidence levels.
     ///
     /// - Minimum 6 keys always included
-    /// - A key with best confidence >= 1.0 stays included
-    /// - New key unlocks only when ALL included keys have confidence >= 1.0
-    /// - Focused key = included key with lowest confidence
+    /// - Inclusion / unlock gating uses **best_confidence** (historical best)
+    ///   so a previously-learned key cannot re-lock after a bad session.
+    /// - Focus selection uses **current confidence** — focus should follow
+    ///   present weakness, not historical weakness.
+    /// - New key unlocks only when ALL included keys have best_confidence >= 1.0.
     pub fn update(&mut self, stats: &HashMap<char, KeyStats>, target_cpm: f64) {
-        // Check if all active keys are learned (confidence >= 1.0)
+        // INCLUDE gate: are all active keys "learned" by their historical best?
         let all_learned = self.active_keys.iter().all(|key| {
             stats
                 .get(key)
-                .map(|s| s.confidence(target_cpm) >= 1.0)
+                .map(|s| s.best_confidence(target_cpm) >= 1.0)
                 .unwrap_or(false)
         });
 
-        // Unlock next key if all current keys are learned
+        // Unlock next key if all current keys are learned (by best)
         if all_learned && self.unlock_index < UNLOCK_ORDER.len() {
             let next = UNLOCK_ORDER[self.unlock_index];
             self.active_keys.push(next);
             self.unlock_index += 1;
         }
 
-        // Find the focused key: active key with lowest confidence
+        // FOCUS gate: pick the active key with the lowest CURRENT confidence.
         self.focused_key = self
             .active_keys
             .iter()
@@ -175,6 +177,65 @@ mod tests {
             "focused key should be an unpracticed key, got '{}'",
             focused
         );
+    }
+
+    #[test]
+    fn include_uses_best_confidence_not_current() {
+        // A key with regressed current time but a fast historical best should
+        // remain "learned" for the include gate — so an unlock can still happen.
+        let mut sched = LetterScheduler::new();
+        let target_cpm = 175.0;
+        let target_time = 60_000.0 / target_cpm; // ≈ 342.86
+        let mut stats = HashMap::new();
+
+        for &key in &['e', 't', 'a', 'o', 'i', 'n'] {
+            let mut ks = KeyStats::default();
+            ks.attempts = 30;
+            // Current is regressed (slow) — confidence < 1.0
+            ks.filtered_time_ms = 2.0 * target_time;
+            // But best is fast — best_confidence > 1.0
+            ks.best_filtered_time_ms = 0.9 * target_time;
+            stats.insert(key, ks);
+        }
+
+        sched.update(&stats, target_cpm);
+        // Despite current being slow, the include gate uses best → unlock fires.
+        assert_eq!(sched.active_keys.len(), 7);
+        assert!(sched.active_keys.contains(&'s'));
+    }
+
+    #[test]
+    fn focus_uses_current_confidence_not_best() {
+        // Focus must pick the active key with the lowest CURRENT confidence,
+        // even when that key still has a fast historical best.
+        // Construct a scenario where one starter key has a slow current time
+        // but the include gate does NOT unlock a new key (so the active set
+        // stays at exactly the 6 starter keys we control).
+        let mut sched = LetterScheduler::new();
+        let target_cpm = 175.0;
+        let target_time = 60_000.0 / target_cpm;
+        let mut stats = HashMap::new();
+
+        // 5 of 6 starters: not "learned" by best either — so no unlock fires.
+        // (best_confidence < 1.0 for these → include gate blocks unlock.)
+        for &key in &['e', 't', 'a', 'o', 'i'] {
+            let mut ks = KeyStats::default();
+            ks.attempts = 30;
+            ks.filtered_time_ms = 1.5 * target_time; // current: confidence < 1
+            ks.best_filtered_time_ms = 1.2 * target_time; // best: confidence < 1
+            stats.insert(key, ks);
+        }
+        // 'n' has a great historical best but a regressed current time —
+        // its current confidence should be the worst of the 6 → focused key.
+        let mut n_stats = KeyStats::default();
+        n_stats.attempts = 30;
+        n_stats.filtered_time_ms = 3.0 * target_time; // current: worst
+        n_stats.best_filtered_time_ms = 0.5 * target_time; // best: fastest
+        stats.insert('n', n_stats);
+
+        sched.update(&stats, target_cpm);
+        assert_eq!(sched.active_keys.len(), 6, "no unlock should fire here");
+        assert_eq!(sched.focused_key, Some('n'));
     }
 
     #[test]

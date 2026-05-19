@@ -1,4 +1,5 @@
 pub mod confidence;
+pub mod dictionary;
 pub mod filter;
 pub mod generator;
 pub mod scheduler;

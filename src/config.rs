@@ -11,6 +11,10 @@ fn default_fragment_length() -> usize {
     100
 }
 
+fn default_natural_words() -> bool {
+    true
+}
+
 /// Serializable error mode for config file.
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -31,6 +35,12 @@ pub struct Config {
 
     #[serde(default = "default_fragment_length")]
     pub fragment_length: usize,
+
+    /// When true, the word generator prefers real English dictionary
+    /// words; when none match the active letter filter, it falls back
+    /// to the phonetic order-4 model.
+    #[serde(default = "default_natural_words")]
+    pub natural_words: bool,
 }
 
 impl Default for Config {
@@ -39,6 +49,7 @@ impl Default for Config {
             target_wpm: default_target_wpm(),
             error_mode: ErrorModeSerde::default(),
             fragment_length: default_fragment_length(),
+            natural_words: default_natural_words(),
         }
     }
 }
@@ -111,12 +122,14 @@ mod tests {
             target_wpm: 50,
             error_mode: ErrorModeSerde::StopOnError,
             fragment_length: 120,
+            natural_words: false,
         };
         let serialized = toml::to_string_pretty(&cfg).unwrap();
         let deserialized: Config = toml::from_str(&serialized).unwrap();
         assert_eq!(deserialized.target_wpm, 50);
         assert_eq!(deserialized.error_mode, ErrorModeSerde::StopOnError);
         assert_eq!(deserialized.fragment_length, 120);
+        assert!(!deserialized.natural_words);
     }
 
     #[test]
@@ -125,6 +138,7 @@ mod tests {
         assert_eq!(cfg.target_wpm, 35);
         assert_eq!(cfg.error_mode, ErrorModeSerde::ForgiveMistakes);
         assert_eq!(cfg.fragment_length, 100);
+        assert!(cfg.natural_words);
     }
 
     #[test]

@@ -4,7 +4,7 @@ use std::time::Instant;
 use crate::config::{Config, ErrorModeSerde};
 use crate::engine::{LetterFilter, LetterScheduler, WordGenerator};
 use crate::metrics::KeyStats;
-use crate::persistence::{SavedKeyStats, SavedStats};
+use crate::persistence::{today_date_string, SavedKeyStats, SavedStats};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorMode {
@@ -82,6 +82,18 @@ pub struct App {
     pub target_cpm: f64,
     /// Fragment length for text generation.
     pub fragment_length: usize,
+    /// When true, mix real English dictionary words into generated text
+    /// (falling back to the phonetic model when no word matches the
+    /// active letter filter).
+    pub natural_words: bool,
+    /// Daily practice goal in minutes. 0 hides the daily-goal indicator.
+    pub daily_goal_minutes: u32,
+
+    // --- Daily-goal tracker (persisted) ---
+    /// Whole wall-clock minutes practiced today.
+    pub today_minutes_practiced: u32,
+    /// YYYY-MM-DD this counter refers to. Reset on day rollover.
+    pub today_date: String,
 
     // --- Navigation state ---
     /// Selected item index in the main menu.
@@ -109,6 +121,9 @@ impl App {
         let mut stats: HashMap<char, KeyStats> = HashMap::new();
         let target_cpm = target_wpm as f64 * 5.0;
         let mut lesson_count: u32 = 0;
+        let today = today_date_string();
+        let mut today_minutes_practiced: u32 = 0;
+        let mut today_date: String = today.clone();
 
         // Restore from saved stats if available
         if let Some(saved) = saved {
@@ -133,6 +148,17 @@ impl App {
             }
 
             lesson_count = saved.total_lessons;
+
+            // Restore daily-goal counter (with day-rollover protection).
+            // `load()` already normalises on read, but be defensive in case
+            // a caller hands us a raw SavedStats from somewhere else.
+            if saved.today_date == today && !today.is_empty() {
+                today_minutes_practiced = saved.today_minutes_practiced;
+                today_date = saved.today_date;
+            } else {
+                today_minutes_practiced = 0;
+                today_date = today.clone();
+            }
         }
 
         // Initial scheduler update to set focused key
@@ -140,6 +166,9 @@ impl App {
 
         let filter = LetterFilter::new(&scheduler.active_keys, scheduler.focused_key);
         let mut generator = WordGenerator::new();
+        // Default to the natural-words blend on; main.rs overrides this
+        // from the loaded config immediately after construction.
+        generator.set_natural_words(true);
         let text = generator.generate_fragment(&filter, 100);
 
         App {
@@ -164,6 +193,10 @@ impl App {
             error_mode,
             target_cpm,
             fragment_length: 100,
+            natural_words: true,
+            daily_goal_minutes: 30,
+            today_minutes_practiced,
+            today_date,
             menu_selection: 0,
             settings_selection: 0,
         }
@@ -247,6 +280,10 @@ impl App {
     /// Called when the user dismisses the lesson summary (any key).
     /// Generates new text and returns to the typing screen.
     pub fn start_next_lesson(&mut self) {
+        // Propagate the current natural-words preference into the
+        // generator before regenerating, so config changes take effect
+        // at the next lesson boundary.
+        self.generator.set_natural_words(self.natural_words);
         let filter = LetterFilter::new(&self.scheduler.active_keys, self.scheduler.focused_key);
         self.generated_text = self
             .generator
@@ -283,11 +320,13 @@ impl App {
         }
 
         SavedStats {
-            version: 1,
+            version: 2,
             keys,
             unlocked_letters: self.scheduler.active_keys.clone(),
             total_lessons: self.lesson_count,
             last_session: chrono_now_iso8601(),
+            today_minutes_practiced: self.today_minutes_practiced,
+            today_date: self.today_date.clone(),
         }
     }
 
@@ -300,6 +339,7 @@ impl App {
                 ErrorMode::StopOnError => ErrorModeSerde::StopOnError,
             },
             fragment_length: self.fragment_length,
+            natural_words: self.natural_words,
         }
     }
 }

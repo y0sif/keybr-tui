@@ -71,6 +71,17 @@ impl KeyStats {
         confidence::confidence(target_cpm, self.filtered_time_ms)
     }
 
+    /// Best (historical) confidence for this key given a target CPM.
+    /// Mirrors `confidence()` but reads `best_filtered_time_ms` so a
+    /// learned key cannot re-lock after a bad session.
+    /// Returns 0.0 when no sample has been recorded yet.
+    pub fn best_confidence(&self, target_cpm: f64) -> f64 {
+        if self.best_filtered_time_ms == 0.0 {
+            return 0.0;
+        }
+        confidence::confidence(target_cpm, self.best_filtered_time_ms)
+    }
+
     /// Whether this key has met the proficiency threshold.
     /// Uses the confidence system: confidence >= 1.0 means learned.
     #[allow(dead_code)]
@@ -197,6 +208,31 @@ mod tests {
             "confidence should be < 1.0 for slow typing, got {}",
             c
         );
+    }
+
+    #[test]
+    fn best_confidence_zero_without_sample() {
+        let stats = KeyStats::default();
+        assert!((stats.best_confidence(175.0) - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn best_confidence_uses_best_not_current() {
+        // Target time @ 175 CPM ≈ 342.86ms.
+        // Construct a key whose current filtered time is regressed (slow), but
+        // whose best_filtered_time_ms is faster than target — best_confidence
+        // should be >= 1.0 even though current confidence is < 1.0.
+        let target_cpm = 175.0;
+        let target_time = 60_000.0 / target_cpm; // ≈ 342.86
+        let mut stats = KeyStats::default();
+        stats.filtered_time_ms = 2.0 * target_time; // current: regressed
+        stats.best_filtered_time_ms = 0.9 * target_time; // best: faster than target
+        stats.attempts = 50;
+
+        let cur = stats.confidence(target_cpm);
+        let best = stats.best_confidence(target_cpm);
+        assert!(cur < 1.0, "current confidence should be < 1.0, got {}", cur);
+        assert!(best >= 1.0, "best confidence should be >= 1.0, got {}", best);
     }
 
     #[test]

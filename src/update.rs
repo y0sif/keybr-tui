@@ -6,6 +6,7 @@ use crate::app::{App, AppScreen, ErrorMode};
 use crate::components::menu::MENU_ITEMS;
 use crate::components::settings::SETTINGS_COUNT;
 use crate::events::AppEvent;
+use crate::persistence::today_date_string;
 
 /// Save stats to disk, logging errors to stderr without crashing.
 fn auto_save_stats(app: &App) {
@@ -21,6 +22,18 @@ fn auto_save_config(app: &App) {
     if let Err(e) = cfg.save() {
         eprintln!("Warning: failed to save config: {e}");
     }
+}
+
+/// Increment `today_minutes_practiced` by `lesson_minutes`, after checking
+/// for a day-rollover that may have happened mid-session.
+/// Uses whole minutes only — prefer slight under-counting over fudging partials.
+fn tick_daily_goal(app: &mut App, lesson_minutes: u32) {
+    let today = today_date_string();
+    if app.today_date != today {
+        app.today_date = today;
+        app.today_minutes_practiced = 0;
+    }
+    app.today_minutes_practiced = app.today_minutes_practiced.saturating_add(lesson_minutes);
 }
 
 pub fn update(app: &mut App, event: AppEvent) {
@@ -181,7 +194,12 @@ fn handle_typed_char(app: &mut App, typed: char) {
         app.key_target_start = Some(Instant::now());
 
         if app.cursor_pos >= app.generated_text.chars().count() {
+            let lesson_minutes = app
+                .lesson_start
+                .map(|s| (s.elapsed().as_secs() / 60) as u32)
+                .unwrap_or(0);
             app.finish_lesson();
+            tick_daily_goal(app, lesson_minutes);
             auto_save_stats(app);
         }
     } else {
@@ -205,7 +223,13 @@ fn handle_typed_char(app: &mut App, typed: char) {
                 app.key_target_start = Some(Instant::now());
 
                 if app.cursor_pos >= app.generated_text.chars().count() {
+                    let lesson_minutes = app
+                        .lesson_start
+                        .map(|s| (s.elapsed().as_secs() / 60) as u32)
+                        .unwrap_or(0);
                     app.finish_lesson();
+                    tick_daily_goal(app, lesson_minutes);
+                    auto_save_stats(app);
                 }
             }
             ErrorMode::StopOnError => {
