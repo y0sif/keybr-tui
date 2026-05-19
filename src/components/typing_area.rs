@@ -18,7 +18,17 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         .alignment(Alignment::Left)
         .block(Block::default().borders(Borders::NONE));
 
-    let inner = centered_rect(area, 80);
+    // Center vertically inside whatever the parent layout gave us, then
+    // narrow horizontally to ~80% of that strip.
+    let v_split = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(33),
+            Constraint::Min(0),
+            Constraint::Percentage(33),
+        ])
+        .split(area);
+    let inner = centered_rect(v_split[1], 80);
     frame.render_widget(para, inner);
 }
 

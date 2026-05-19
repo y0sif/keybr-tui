@@ -8,6 +8,71 @@ use ratatui::{
 
 use crate::app::App;
 use crate::engine::scheduler::UNLOCK_ORDER;
+use crate::metrics::KeyStats;
+
+// Column widths.
+// Key (3) | WPM (5) | Best (5) | Attempts (10) | Errors (8) | Status (12)
+const W_KEY: usize = 3;
+const W_WPM: usize = 5;
+const W_BEST: usize = 5;
+const W_ATTEMPTS: usize = 10;
+const W_ERRORS: usize = 8;
+const W_STATUS: usize = 12;
+
+const NO_SAMPLE: &str = "—";
+
+/// Progress tier derived from confidence vs. target CPM.
+/// `Locked` keys haven't been unlocked by the scheduler yet.
+enum Tier {
+    Locked,
+    Early,
+    Progressing,
+    Learned,
+}
+
+impl Tier {
+    fn label(&self) -> &'static str {
+        match self {
+            Tier::Locked => "Locked",
+            Tier::Early => "Early",
+            Tier::Progressing => "Progressing",
+            Tier::Learned => "Learned",
+        }
+    }
+
+    fn color(&self) -> Color {
+        match self {
+            Tier::Locked => Color::DarkGray,
+            Tier::Early => Color::White,
+            Tier::Progressing => Color::Yellow,
+            Tier::Learned => Color::Green,
+        }
+    }
+}
+
+fn tier_for(is_active: bool, stats: Option<&KeyStats>, target_cpm: f64) -> Tier {
+    if !is_active {
+        return Tier::Locked;
+    }
+    let Some(stats) = stats else {
+        return Tier::Early;
+    };
+    let conf = stats.confidence(target_cpm);
+    if conf >= 1.0 {
+        Tier::Learned
+    } else if conf >= 0.5 {
+        Tier::Progressing
+    } else {
+        Tier::Early
+    }
+}
+
+fn format_wpm(value: Option<f64>) -> String {
+    match value {
+        Some(v) => format!("{}", v.round() as i64),
+        None => NO_SAMPLE.to_string(),
+    }
+}
 
 pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let v_chunks = Layout::default()
@@ -36,15 +101,46 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
 
     let mut lines: Vec<Line> = Vec::new();
 
-    // Header
-    lines.push(Line::from(vec![Span::styled(
-        "  Key   Confidence   Speed(ms)   Errors       Status",
+    // Header — Key left-aligned, numerics right-aligned, Status left-aligned.
+    let header = format!(
+        "  {:<kw$}  {:>ww$}  {:>bw$}  {:>aw$}  {:>ew$}  {:<sw$}",
+        "Key",
+        "WPM",
+        "Best",
+        "Attempts",
+        "Errors",
+        "Status",
+        kw = W_KEY,
+        ww = W_WPM,
+        bw = W_BEST,
+        aw = W_ATTEMPTS,
+        ew = W_ERRORS,
+        sw = W_STATUS,
+    );
+    lines.push(Line::from(Span::styled(
+        header,
         Style::default()
             .fg(Color::White)
             .add_modifier(Modifier::BOLD),
-    )]));
+    )));
+
+    let rule = format!(
+        "  {:<kw$}  {:>ww$}  {:>bw$}  {:>aw$}  {:>ew$}  {:<sw$}",
+        "-".repeat(W_KEY),
+        "-".repeat(W_WPM),
+        "-".repeat(W_BEST),
+        "-".repeat(W_ATTEMPTS),
+        "-".repeat(W_ERRORS),
+        "-".repeat(W_STATUS),
+        kw = W_KEY,
+        ww = W_WPM,
+        bw = W_BEST,
+        aw = W_ATTEMPTS,
+        ew = W_ERRORS,
+        sw = W_STATUS,
+    );
     lines.push(Line::from(Span::styled(
-        "  ---   ----------   ---------   ------       ------",
+        rule,
         Style::default().fg(Color::DarkGray),
     )));
 
@@ -52,64 +148,50 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         let is_active = active_set.contains(&key);
         let is_focused = app.scheduler.focused_key == Some(key);
 
-        if let Some(stats) = app.per_key_stats.get(&key) {
-            let conf = stats.confidence(app.target_cpm);
-            let conf_pct = (conf * 100.0).round() as i32;
-            let speed = if stats.filtered_time_ms > 0.0 {
-                format!("{:.0}", stats.filtered_time_ms)
-            } else {
-                "----".to_string()
-            };
-            let errors = format!("{}/{}", stats.errors, stats.attempts);
+        let stats = app.per_key_stats.get(&key);
+        let tier = tier_for(is_active, stats, app.target_cpm);
 
-            let status = if !is_active {
-                "Locked"
-            } else if conf >= 1.0 {
-                "Learned"
-            } else {
-                "Active"
-            };
+        let (wpm_str, best_str, attempts_str, errors_str) = match stats {
+            Some(s) => (
+                format_wpm(s.wpm()),
+                format_wpm(s.best_wpm()),
+                format!("{}", s.attempts),
+                format!("{}", s.errors),
+            ),
+            None => (
+                NO_SAMPLE.to_string(),
+                NO_SAMPLE.to_string(),
+                NO_SAMPLE.to_string(),
+                NO_SAMPLE.to_string(),
+            ),
+        };
 
-            let focus_marker = if is_focused { " < Focus" } else { "" };
+        let status_label = tier.label();
+        let focus_marker = if is_focused { " < Focus" } else { "" };
 
-            let row = format!(
-                "   {}     {:>4}%        {:>5}       {:>8}     {}{}",
-                key, conf_pct, speed, errors, status, focus_marker
-            );
+        let row = format!(
+            "  {:<kw$}  {:>ww$}  {:>bw$}  {:>aw$}  {:>ew$}  {:<sw$}{}",
+            key,
+            wpm_str,
+            best_str,
+            attempts_str,
+            errors_str,
+            status_label,
+            focus_marker,
+            kw = W_KEY,
+            ww = W_WPM,
+            bw = W_BEST,
+            aw = W_ATTEMPTS,
+            ew = W_ERRORS,
+            sw = W_STATUS,
+        );
 
-            let color = if !is_active {
-                Color::DarkGray
-            } else if conf >= 1.0 {
-                Color::Green
-            } else {
-                Color::White
-            };
-
-            let mut style = Style::default().fg(color);
-            if is_focused {
-                style = style.add_modifier(Modifier::BOLD);
-            }
-
-            lines.push(Line::from(Span::styled(row, style)));
-        } else {
-            // No stats yet
-            let status = if is_active { "Active" } else { "Locked" };
-            let focus_marker = if is_focused { " < Focus" } else { "" };
-            let row = format!(
-                "   {}     ----        -----       --------     {}{}",
-                key, status, focus_marker
-            );
-            let color = if is_active {
-                Color::White
-            } else {
-                Color::DarkGray
-            };
-            let mut style = Style::default().fg(color);
-            if is_focused {
-                style = style.add_modifier(Modifier::BOLD);
-            }
-            lines.push(Line::from(Span::styled(row, style)));
+        let mut style = Style::default().fg(tier.color());
+        if is_focused {
+            style = style.add_modifier(Modifier::BOLD);
         }
+
+        lines.push(Line::from(Span::styled(row, style)));
     }
 
     let table = Paragraph::new(Text::from(lines)).alignment(Alignment::Left);

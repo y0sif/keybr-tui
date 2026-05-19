@@ -8,12 +8,16 @@ fn default_version() -> u32 {
     1
 }
 
-fn default_today_minutes_practiced() -> u32 {
+fn default_today_seconds_practiced() -> u32 {
     0
 }
 
 fn default_today_date() -> String {
     String::new()
+}
+
+fn default_legacy_minutes() -> Option<u32> {
+    None
 }
 
 /// Compute YYYY-MM-DD for the current Unix day (UTC).
@@ -77,12 +81,18 @@ pub struct SavedStats {
     /// Timestamp of last session (ISO 8601).
     pub last_session: String,
 
-    /// Minutes practiced *today* (wall-clock minutes, whole minutes only).
-    /// Reset to 0 when `today_date` rolls over.
-    #[serde(default = "default_today_minutes_practiced")]
-    pub today_minutes_practiced: u32,
+    /// Seconds practiced *today* (wall-clock seconds).
+    /// Reset to 0 when `today_date` rolls over. Stored in seconds to avoid
+    /// floor-to-zero on sub-minute lessons.
+    #[serde(default = "default_today_seconds_practiced")]
+    pub today_seconds_practiced: u32,
 
-    /// YYYY-MM-DD for the day the `today_minutes_practiced` counter refers to.
+    /// Pre-v0.2.1 minutes field. Read-only on load (for one-time migration).
+    /// Always written as `None` so it disappears from new files.
+    #[serde(default = "default_legacy_minutes", skip_serializing)]
+    pub today_minutes_practiced: Option<u32>,
+
+    /// YYYY-MM-DD for the day the `today_seconds_practiced` counter refers to.
     /// Empty string means "no day yet" (e.g. fresh install or v1 migration).
     #[serde(default = "default_today_date")]
     pub today_date: String,
@@ -109,13 +119,23 @@ impl SavedStats {
                     let today = today_date_string();
                     if stats.version < 2 {
                         // v1 → v2 migration: reset daily counter, bump version.
-                        stats.today_minutes_practiced = 0;
+                        stats.today_seconds_practiced = 0;
                         stats.today_date = String::new();
                         stats.version = 2;
-                    } else if stats.today_date != today {
-                        // Same schema, but day rolled over while we were offline.
-                        stats.today_minutes_practiced = 0;
-                        stats.today_date = today;
+                    } else {
+                        // v0.2.0 → v0.2.1 in-schema migration: minutes → seconds.
+                        // Pre-fix `today_minutes_practiced` was almost always 0
+                        // because of the integer-divide bug, but be defensive.
+                        if let Some(legacy_min) = stats.today_minutes_practiced.take() {
+                            if stats.today_seconds_practiced == 0 && legacy_min > 0 {
+                                stats.today_seconds_practiced = legacy_min.saturating_mul(60);
+                            }
+                        }
+                        if stats.today_date != today {
+                            // Same schema, but day rolled over while we were offline.
+                            stats.today_seconds_practiced = 0;
+                            stats.today_date = today;
+                        }
                     }
                     Some(stats)
                 }
@@ -201,7 +221,8 @@ mod tests {
             unlocked_letters: vec!['e', 't', 'a', 'o', 'i', 'n', 's'],
             total_lessons: 12,
             last_session: "2026-03-29T12:00:00Z".to_string(),
-            today_minutes_practiced: 17,
+            today_seconds_practiced: 1042,
+            today_minutes_practiced: None,
             today_date: "2026-03-29".to_string(),
         };
 
@@ -212,7 +233,7 @@ mod tests {
         assert_eq!(deserialized.total_lessons, 12);
         assert_eq!(deserialized.unlocked_letters.len(), 7);
         assert_eq!(deserialized.keys.len(), 2);
-        assert_eq!(deserialized.today_minutes_practiced, 17);
+        assert_eq!(deserialized.today_seconds_practiced, 1042);
         assert_eq!(deserialized.today_date, "2026-03-29");
 
         let e_stats = deserialized.keys.get(&'e').unwrap();
@@ -233,8 +254,27 @@ mod tests {
         let stats: SavedStats = serde_json::from_str(json).unwrap();
         assert_eq!(stats.version, 1);
         // v1 JSON omits the daily-goal fields → serde fills defaults.
-        assert_eq!(stats.today_minutes_practiced, 0);
+        assert_eq!(stats.today_seconds_practiced, 0);
+        assert_eq!(stats.today_minutes_practiced, None);
         assert_eq!(stats.today_date, "");
+    }
+
+    #[test]
+    fn legacy_minutes_field_deserializes() {
+        // Old v2 file written by v0.2.0 has today_minutes_practiced (no seconds).
+        // Should land in the legacy Option so the load-time migration can pick it up.
+        let json = r#"{
+            "version": 2,
+            "keys": {},
+            "unlocked_letters": [],
+            "total_lessons": 0,
+            "last_session": "",
+            "today_minutes_practiced": 7,
+            "today_date": "2026-03-29"
+        }"#;
+        let stats: SavedStats = serde_json::from_str(json).unwrap();
+        assert_eq!(stats.today_minutes_practiced, Some(7));
+        assert_eq!(stats.today_seconds_practiced, 0);
     }
 
     #[test]

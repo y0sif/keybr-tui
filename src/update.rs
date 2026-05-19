@@ -24,16 +24,17 @@ fn auto_save_config(app: &App) {
     }
 }
 
-/// Increment `today_minutes_practiced` by `lesson_minutes`, after checking
+/// Increment `today_seconds_practiced` by `lesson_seconds`, after checking
 /// for a day-rollover that may have happened mid-session.
-/// Uses whole minutes only — prefer slight under-counting over fudging partials.
-fn tick_daily_goal(app: &mut App, lesson_minutes: u32) {
+/// Tracking in seconds (display as minutes) avoids the sub-minute floor-to-zero
+/// that made the daily-goal bar appear stuck at 0.
+fn tick_daily_goal(app: &mut App, lesson_seconds: u32) {
     let today = today_date_string();
     if app.today_date != today {
         app.today_date = today;
-        app.today_minutes_practiced = 0;
+        app.today_seconds_practiced = 0;
     }
-    app.today_minutes_practiced = app.today_minutes_practiced.saturating_add(lesson_minutes);
+    app.today_seconds_practiced = app.today_seconds_practiced.saturating_add(lesson_seconds);
 }
 
 pub fn update(app: &mut App, event: AppEvent) {
@@ -57,7 +58,6 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
     match app.screen {
         AppScreen::Menu => handle_menu_key(app, key),
         AppScreen::Typing => handle_typing_key(app, key),
-        AppScreen::LessonSummary => handle_summary_key(app, key),
         AppScreen::Progress => handle_progress_key(app, key),
         AppScreen::Settings => handle_settings_key(app, key),
     }
@@ -194,12 +194,12 @@ fn handle_typed_char(app: &mut App, typed: char) {
         app.key_target_start = Some(Instant::now());
 
         if app.cursor_pos >= app.generated_text.chars().count() {
-            let lesson_minutes = app
+            let lesson_seconds = app
                 .lesson_start
-                .map(|s| (s.elapsed().as_secs() / 60) as u32)
+                .map(|s| s.elapsed().as_secs() as u32)
                 .unwrap_or(0);
             app.finish_lesson();
-            tick_daily_goal(app, lesson_minutes);
+            tick_daily_goal(app, lesson_seconds);
             auto_save_stats(app);
         }
     } else {
@@ -223,12 +223,12 @@ fn handle_typed_char(app: &mut App, typed: char) {
                 app.key_target_start = Some(Instant::now());
 
                 if app.cursor_pos >= app.generated_text.chars().count() {
-                    let lesson_minutes = app
+                    let lesson_seconds = app
                         .lesson_start
-                        .map(|s| (s.elapsed().as_secs() / 60) as u32)
+                        .map(|s| s.elapsed().as_secs() as u32)
                         .unwrap_or(0);
                     app.finish_lesson();
-                    tick_daily_goal(app, lesson_minutes);
+                    tick_daily_goal(app, lesson_seconds);
                     auto_save_stats(app);
                 }
             }
@@ -236,23 +236,6 @@ fn handle_typed_char(app: &mut App, typed: char) {
                 app.error_positions.insert(pos);
                 app.key_target_start = Some(Instant::now());
             }
-        }
-    }
-}
-
-// --- Lesson summary screen ---
-
-fn handle_summary_key(app: &mut App, key: crossterm::event::KeyEvent) {
-    use KeyCode::*;
-
-    match key.code {
-        Esc => {
-            // Esc on summary goes to menu
-            app.screen = AppScreen::Menu;
-        }
-        _ => {
-            // Any other key starts the next lesson
-            app.start_next_lesson();
         }
     }
 }
@@ -536,22 +519,30 @@ mod tests {
     }
 
     #[test]
-    fn summary_esc_goes_to_menu() {
+    fn finishing_lesson_stays_on_typing_screen() {
+        // Typing the last char of a fragment should keep us on the Typing
+        // screen — no separate summary screen anymore — and immediately
+        // regenerate a new fragment.
         let mut app = make_test_app("a");
-        // Type the character to finish the lesson
+        let old_text = app.generated_text.clone();
         update(&mut app, AppEvent::Key(make_key(KeyCode::Char('a'))));
-        assert_eq!(app.screen, AppScreen::LessonSummary);
-        update(&mut app, AppEvent::Key(make_key(KeyCode::Esc)));
-        assert_eq!(app.screen, AppScreen::Menu);
+        assert_eq!(app.screen, AppScreen::Typing);
+        assert!(app.last_lesson.is_some());
+        assert_ne!(app.generated_text, old_text);
+        // The cursor must be reset for the new fragment.
+        assert_eq!(app.cursor_pos, 0);
     }
 
     #[test]
-    fn summary_any_key_starts_next_lesson() {
+    fn finishing_lesson_does_not_require_extra_keystroke() {
+        // Verify that the next fragment is ready to be typed straight away,
+        // no intervening "press any key" intercept.
         let mut app = make_test_app("a");
         update(&mut app, AppEvent::Key(make_key(KeyCode::Char('a'))));
-        assert_eq!(app.screen, AppScreen::LessonSummary);
-        update(&mut app, AppEvent::Key(make_key(KeyCode::Char(' '))));
         assert_eq!(app.screen, AppScreen::Typing);
+        // The first character of the new fragment is the live target —
+        // it must be a real char (not empty).
+        assert!(!app.generated_text.is_empty());
     }
 
     #[test]

@@ -88,6 +88,29 @@ impl KeyStats {
     pub fn is_proficient(&self, target_cpm: f64) -> bool {
         self.confidence(target_cpm) >= 1.0
     }
+
+    /// Current smoothed WPM for this key derived from `filtered_time_ms`.
+    /// Returns `None` if no sample has been recorded yet.
+    ///
+    /// CPM = 60_000 / ms_per_char, and WPM = CPM / 5, so
+    /// WPM = 12_000 / filtered_time_ms.
+    pub fn wpm(&self) -> Option<f64> {
+        if self.filtered_time_ms > 0.0 {
+            Some(12_000.0 / self.filtered_time_ms)
+        } else {
+            None
+        }
+    }
+
+    /// Historical best WPM derived from `best_filtered_time_ms`.
+    /// Returns `None` if no sample has been recorded yet.
+    pub fn best_wpm(&self) -> Option<f64> {
+        if self.best_filtered_time_ms > 0.0 {
+            Some(12_000.0 / self.best_filtered_time_ms)
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg(test)]
@@ -233,6 +256,38 @@ mod tests {
         let best = stats.best_confidence(target_cpm);
         assert!(cur < 1.0, "current confidence should be < 1.0, got {}", cur);
         assert!(best >= 1.0, "best confidence should be >= 1.0, got {}", best);
+    }
+
+    #[test]
+    fn wpm_none_without_sample() {
+        let stats = KeyStats::default();
+        assert!(stats.wpm().is_none());
+        assert!(stats.best_wpm().is_none());
+    }
+
+    #[test]
+    fn wpm_converts_filtered_time_to_wpm() {
+        // 343 ms/char ≈ 175 CPM ≈ 35 WPM
+        let mut stats = KeyStats::default();
+        stats.filtered_time_ms = 343.0;
+        let wpm = stats.wpm().expect("should have a value");
+        assert!(
+            (wpm - 35.0).abs() < 0.1,
+            "expected ~35 WPM, got {}",
+            wpm
+        );
+    }
+
+    #[test]
+    fn best_wpm_converts_best_filtered_time_to_wpm() {
+        let mut stats = KeyStats::default();
+        stats.best_filtered_time_ms = 343.0;
+        let wpm = stats.best_wpm().expect("should have a value");
+        assert!(
+            (wpm - 35.0).abs() < 0.1,
+            "expected ~35 WPM, got {}",
+            wpm
+        );
     }
 
     #[test]

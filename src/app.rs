@@ -18,7 +18,6 @@ pub enum ErrorMode {
 pub enum AppScreen {
     Menu,
     Typing,
-    LessonSummary,
     Progress,
     Settings,
 }
@@ -29,8 +28,6 @@ pub struct LessonResult {
     pub accuracy: f64,
     /// Letter that was unlocked at the end of this lesson, if any.
     pub newly_unlocked: Option<char>,
-    /// Top weakest keys with their confidence levels (sorted weakest first).
-    pub weakest_keys: Vec<(char, f64)>,
 }
 
 pub struct App {
@@ -90,8 +87,9 @@ pub struct App {
     pub daily_goal_minutes: u32,
 
     // --- Daily-goal tracker (persisted) ---
-    /// Whole wall-clock minutes practiced today.
-    pub today_minutes_practiced: u32,
+    /// Wall-clock seconds practiced today. Display as minutes; storing in
+    /// seconds avoids the floor-to-zero on sub-minute lessons.
+    pub today_seconds_practiced: u32,
     /// YYYY-MM-DD this counter refers to. Reset on day rollover.
     pub today_date: String,
 
@@ -122,7 +120,7 @@ impl App {
         let target_cpm = target_wpm as f64 * 5.0;
         let mut lesson_count: u32 = 0;
         let today = today_date_string();
-        let mut today_minutes_practiced: u32 = 0;
+        let mut today_seconds_practiced: u32 = 0;
         let mut today_date: String = today.clone();
 
         // Restore from saved stats if available
@@ -153,10 +151,10 @@ impl App {
             // `load()` already normalises on read, but be defensive in case
             // a caller hands us a raw SavedStats from somewhere else.
             if saved.today_date == today && !today.is_empty() {
-                today_minutes_practiced = saved.today_minutes_practiced;
+                today_seconds_practiced = saved.today_seconds_practiced;
                 today_date = saved.today_date;
             } else {
-                today_minutes_practiced = 0;
+                today_seconds_practiced = 0;
                 today_date = today.clone();
             }
         }
@@ -195,7 +193,7 @@ impl App {
             fragment_length: 100,
             natural_words: true,
             daily_goal_minutes: 30,
-            today_minutes_practiced,
+            today_seconds_practiced,
             today_date,
             menu_selection: 0,
             settings_selection: 0,
@@ -254,27 +252,16 @@ impl App {
             None
         };
 
-        // Compute weakest keys (lowest confidence among active keys)
-        let mut key_confidences: Vec<(char, f64)> = self
-            .scheduler
-            .active_keys
-            .iter()
-            .filter_map(|&k| {
-                self.per_key_stats
-                    .get(&k)
-                    .map(|s| (k, s.confidence(self.target_cpm)))
-            })
-            .collect();
-        key_confidences.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-        let weakest_keys: Vec<(char, f64)> = key_confidences.into_iter().take(5).collect();
-
         self.last_lesson = Some(LessonResult {
             wpm,
             accuracy,
             newly_unlocked,
-            weakest_keys,
         });
-        self.screen = AppScreen::LessonSummary;
+
+        // Immediately roll into the next lesson — no separate summary screen.
+        // `start_next_lesson` regenerates text, resets per-lesson counters,
+        // and sets `screen = AppScreen::Typing`.
+        self.start_next_lesson();
     }
 
     /// Called when the user dismisses the lesson summary (any key).
@@ -325,7 +312,8 @@ impl App {
             unlocked_letters: self.scheduler.active_keys.clone(),
             total_lessons: self.lesson_count,
             last_session: chrono_now_iso8601(),
-            today_minutes_practiced: self.today_minutes_practiced,
+            today_seconds_practiced: self.today_seconds_practiced,
+            today_minutes_practiced: None,
             today_date: self.today_date.clone(),
         }
     }
