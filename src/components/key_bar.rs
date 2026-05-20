@@ -16,13 +16,13 @@ const ALPHABET: &[char] = &[
 
 /// Map a key's best confidence (and unlock state) to a gradient color.
 ///
-/// - `>= 1.00`            -> Green
-/// - `>= 0.75`            -> LightGreen
-/// - `>= 0.50`            -> Yellow
-/// - `>= 0.25`            -> LightRed
-/// - `< 0.25`, active     -> Red
+/// - `>= 1.00`            -> Green        (learned)
+/// - `>= 0.75`            -> LightGreen   (strong)
+/// - `>= 0.50`            -> Yellow       (progressing)
+/// - `>= 0.25`            -> LightRed     (early)
+/// - `< 0.25`, active     -> Red          (struggling / unpracticed)
 /// - inactive (locked)    -> DarkGray
-fn color_for(best_conf: f64, is_active: bool) -> Color {
+pub fn color_for(best_conf: f64, is_active: bool) -> Color {
     if !is_active {
         return Color::DarkGray;
     }
@@ -39,39 +39,79 @@ fn color_for(best_conf: f64, is_active: bool) -> Color {
     }
 }
 
+/// Pick a Unicode block character whose density mirrors `color_for`'s
+/// gradient. Pairing this with the letter gives each key a 2-cell "tile"
+/// look (a colored block followed by the letter), evoking keybr.com's
+/// colored backgrounds without using a real background color — keeps the
+/// brand-identity rule of "no custom bg colors" intact.
+pub fn tile_char(best_conf: f64, is_active: bool) -> char {
+    if !is_active {
+        return '·';
+    }
+    if best_conf >= 1.0 {
+        '█'
+    } else if best_conf >= 0.75 {
+        '▓'
+    } else if best_conf >= 0.5 {
+        '▒'
+    } else if best_conf >= 0.25 {
+        '░'
+    } else {
+        '·'
+    }
+}
+
+/// Build the 2-span tile for a single key (block char + uppercased letter).
+/// Used by both the all-keys row and the focused-key marker in the dashboard.
+pub fn key_tile_spans(key: char, best_conf: f64, is_active: bool, is_focused: bool) -> Vec<Span<'static>> {
+    let color = color_for(best_conf, is_active);
+    let tile = tile_char(best_conf, is_active);
+    let letter = key.to_ascii_uppercase().to_string();
+
+    let mut block_style = Style::default().fg(color);
+    let mut letter_style = Style::default().fg(color);
+    if is_focused {
+        // Bold + underline marks the currently-focused key. Underline on
+        // both the block and the letter ties the two cells together
+        // visually so the marker reads as one unit.
+        block_style = block_style.add_modifier(Modifier::BOLD).add_modifier(Modifier::UNDERLINED);
+        letter_style = letter_style
+            .add_modifier(Modifier::BOLD)
+            .add_modifier(Modifier::UNDERLINED);
+    }
+
+    vec![
+        Span::styled(tile.to_string(), block_style),
+        Span::styled(letter, letter_style),
+    ]
+}
+
 pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let active_set: std::collections::HashSet<char> =
         app.scheduler.active_keys.iter().copied().collect();
     let focused = app.scheduler.focused_key;
 
-    // Build "a b c d ..." — single space between letters.
-    let mut spans: Vec<Span> = Vec::with_capacity(ALPHABET.len() * 2);
+    // Each key takes 2 cells (block + letter). The all-keys row is
+    // visually denser than the old space-separated layout, so we don't
+    // need extra padding between tiles.
+    let mut spans: Vec<Span<'static>> = Vec::with_capacity(ALPHABET.len() * 2);
 
-    for (idx, &key) in ALPHABET.iter().enumerate() {
-        if idx > 0 {
-            spans.push(Span::raw(" "));
-        }
-
+    for &key in ALPHABET.iter() {
         let is_active = active_set.contains(&key);
         let best_conf = app
             .per_key_stats
             .get(&key)
             .map(|s| s.best_confidence(app.target_cpm))
             .unwrap_or(0.0);
+        let is_focused = focused == Some(key);
 
-        let mut style = Style::default().fg(color_for(best_conf, is_active));
-        if focused == Some(key) {
-            style = style
-                .add_modifier(Modifier::BOLD)
-                .add_modifier(Modifier::UNDERLINED);
-        }
-
-        spans.push(Span::styled(key.to_string(), style));
+        spans.extend(key_tile_spans(key, best_conf, is_active, is_focused));
     }
 
-    // Row width is `26 letters + 25 spaces = 51` chars. If it fits, center it;
-    // otherwise just left-align (no wrap, no truncation).
-    let row_width: u16 = (ALPHABET.len() * 2 - 1) as u16;
+    // 26 letters × 2 cells = 52 chars; center when it fits, otherwise
+    // left-align so the leading tiles stay visible if the terminal is
+    // narrow (we'd rather show ENIAR than nothing).
+    let row_width: u16 = (ALPHABET.len() * 2) as u16;
     let alignment = if area.width >= row_width {
         Alignment::Center
     } else {
@@ -109,5 +149,31 @@ mod tests {
         assert_eq!(color_for(0.99, true), Color::LightGreen);
         assert_eq!(color_for(1.0, true), Color::Green);
         assert_eq!(color_for(2.0, true), Color::Green);
+    }
+
+    #[test]
+    fn tile_char_matches_gradient() {
+        assert_eq!(tile_char(0.0, false), '·');
+        assert_eq!(tile_char(0.0, true), '·');
+        assert_eq!(tile_char(0.25, true), '░');
+        assert_eq!(tile_char(0.5, true), '▒');
+        assert_eq!(tile_char(0.75, true), '▓');
+        assert_eq!(tile_char(1.0, true), '█');
+    }
+
+    #[test]
+    fn key_tile_spans_emits_block_then_letter() {
+        let spans = key_tile_spans('e', 1.0, true, false);
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0].content, "█");
+        assert_eq!(spans[1].content, "E");
+    }
+
+    #[test]
+    fn focused_tile_is_bold_and_underlined() {
+        let spans = key_tile_spans('e', 1.0, true, true);
+        let modifiers = spans[1].style.add_modifier;
+        assert!(modifiers.contains(Modifier::BOLD));
+        assert!(modifiers.contains(Modifier::UNDERLINED));
     }
 }

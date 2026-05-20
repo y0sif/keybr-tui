@@ -23,11 +23,21 @@ pub enum AppScreen {
 }
 
 /// Results stored after a lesson completes.
+#[derive(Debug, Clone)]
 pub struct LessonResult {
     pub wpm: f64,
     pub accuracy: f64,
     /// Letter that was unlocked at the end of this lesson, if any.
     pub newly_unlocked: Option<char>,
+}
+
+/// Approximate keybr-style score from a lesson's wpm + accuracy.
+/// Real keybr weights speed and accuracy together; we use a simple
+/// product that rewards both — keep this in sync with any deltas
+/// displayed in the dashboard.
+pub fn lesson_score(wpm: f64, accuracy: f64) -> f64 {
+    let acc_ratio = (accuracy / 100.0).clamp(0.0, 1.0);
+    (wpm * acc_ratio * acc_ratio * 100.0).round()
 }
 
 pub struct App {
@@ -64,6 +74,10 @@ pub struct App {
 
     // --- Last lesson's results (shown in stats bar during next lesson) ---
     pub last_lesson: Option<LessonResult>,
+    /// Rolling in-memory history of completed lessons (capped).
+    /// Not persisted — used only to compute deltas vs running average
+    /// in the dashboard. Older entries fall off the front.
+    pub lesson_history: Vec<LessonResult>,
 
     /// Number of lessons completed in the current session.
     pub lesson_count: u32,
@@ -185,6 +199,7 @@ impl App {
             per_key_stats: stats,
             key_target_start: None,
             last_lesson: None,
+            lesson_history: Vec::new(),
             lesson_count,
             scheduler,
             generator,
@@ -226,6 +241,41 @@ impl App {
         (correct_chars / 5.0) / (elapsed_secs / 60.0)
     }
 
+    /// Mean WPM of all lessons in `lesson_history` *excluding* the most
+    /// recent one, so deltas computed from this don't self-compare.
+    /// Returns `None` when there's no prior lesson to compare against.
+    pub fn prev_mean_wpm(&self) -> Option<f64> {
+        let n = self.lesson_history.len();
+        if n < 2 {
+            return None;
+        }
+        let sum: f64 = self.lesson_history[..n - 1].iter().map(|r| r.wpm).sum();
+        Some(sum / (n - 1) as f64)
+    }
+
+    /// Mean accuracy of all lessons *excluding* the most recent one.
+    pub fn prev_mean_accuracy(&self) -> Option<f64> {
+        let n = self.lesson_history.len();
+        if n < 2 {
+            return None;
+        }
+        let sum: f64 = self.lesson_history[..n - 1].iter().map(|r| r.accuracy).sum();
+        Some(sum / (n - 1) as f64)
+    }
+
+    /// Mean score (derived from wpm + accuracy) of all lessons except the last.
+    pub fn prev_mean_score(&self) -> Option<f64> {
+        let n = self.lesson_history.len();
+        if n < 2 {
+            return None;
+        }
+        let sum: f64 = self.lesson_history[..n - 1]
+            .iter()
+            .map(|r| lesson_score(r.wpm, r.accuracy))
+            .sum();
+        Some(sum / (n - 1) as f64)
+    }
+
     /// Accuracy for the current lesson so far.
     pub fn lesson_accuracy(&self) -> f64 {
         if self.lesson_positions == 0 {
@@ -252,11 +302,21 @@ impl App {
             None
         };
 
-        self.last_lesson = Some(LessonResult {
+        let result = LessonResult {
             wpm,
             accuracy,
             newly_unlocked,
-        });
+        };
+        // Push to in-memory history so the dashboard can compute deltas
+        // against the running mean. Cap so a long session can't grow this
+        // unboundedly.
+        const HISTORY_CAP: usize = 50;
+        self.lesson_history.push(result.clone());
+        if self.lesson_history.len() > HISTORY_CAP {
+            let overflow = self.lesson_history.len() - HISTORY_CAP;
+            self.lesson_history.drain(0..overflow);
+        }
+        self.last_lesson = Some(result);
 
         // Immediately roll into the next lesson — no separate summary screen.
         // `start_next_lesson` regenerates text, resets per-lesson counters,
