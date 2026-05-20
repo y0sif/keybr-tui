@@ -4,7 +4,7 @@ use std::time::Instant;
 use crate::config::{Config, ErrorModeSerde};
 use crate::engine::{LetterFilter, LetterScheduler, WordGenerator};
 use crate::metrics::KeyStats;
-use crate::persistence::{today_date_string, SavedKeyStats, SavedStats};
+use crate::persistence::{today_date_string, SavedKeyStats, SavedLessonResult, SavedStats};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorMode {
@@ -136,6 +136,8 @@ impl App {
         let today = today_date_string();
         let mut today_seconds_practiced: u32 = 0;
         let mut today_date: String = today.clone();
+        let mut last_lesson: Option<LessonResult> = None;
+        let mut lesson_history: Vec<LessonResult> = Vec::new();
 
         // Restore from saved stats if available
         if let Some(saved) = saved {
@@ -171,6 +173,25 @@ impl App {
                 today_seconds_practiced = 0;
                 today_date = today.clone();
             }
+
+            // Restore lesson stats so the dashboard's Metrics row shows
+            // the previous session's numbers (and deltas) on launch.
+            // `newly_unlocked` is intentionally not persisted — the
+            // unlock callout is a one-time celebration, not state.
+            last_lesson = saved.last_lesson.map(|r| LessonResult {
+                wpm: r.wpm,
+                accuracy: r.accuracy,
+                newly_unlocked: None,
+            });
+            lesson_history = saved
+                .lesson_history
+                .into_iter()
+                .map(|r| LessonResult {
+                    wpm: r.wpm,
+                    accuracy: r.accuracy,
+                    newly_unlocked: None,
+                })
+                .collect();
         }
 
         // Initial scheduler update to set focused key
@@ -198,8 +219,8 @@ impl App {
             lesson_errors: 0,
             per_key_stats: stats,
             key_target_start: None,
-            last_lesson: None,
-            lesson_history: Vec::new(),
+            last_lesson,
+            lesson_history,
             lesson_count,
             scheduler,
             generator,
@@ -375,6 +396,18 @@ impl App {
             today_seconds_practiced: self.today_seconds_practiced,
             today_minutes_practiced: None,
             today_date: self.today_date.clone(),
+            last_lesson: self.last_lesson.as_ref().map(|r| SavedLessonResult {
+                wpm: r.wpm,
+                accuracy: r.accuracy,
+            }),
+            lesson_history: self
+                .lesson_history
+                .iter()
+                .map(|r| SavedLessonResult {
+                    wpm: r.wpm,
+                    accuracy: r.accuracy,
+                })
+                .collect(),
         }
     }
 
@@ -388,6 +421,7 @@ impl App {
             },
             fragment_length: self.fragment_length,
             natural_words: self.natural_words,
+            daily_goal_minutes: self.daily_goal_minutes,
         }
     }
 }

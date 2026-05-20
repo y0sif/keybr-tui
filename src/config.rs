@@ -15,6 +15,10 @@ fn default_natural_words() -> bool {
     true
 }
 
+fn default_daily_goal_minutes() -> u32 {
+    30
+}
+
 /// Serializable error mode for config file.
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -41,6 +45,11 @@ pub struct Config {
     /// to the phonetic order-4 model.
     #[serde(default = "default_natural_words")]
     pub natural_words: bool,
+
+    /// Daily practice goal in minutes. 0 hides the daily-goal indicator
+    /// in the dashboard. Defaults to 30 to match the in-app default.
+    #[serde(default = "default_daily_goal_minutes")]
+    pub daily_goal_minutes: u32,
 }
 
 impl Default for Config {
@@ -50,6 +59,7 @@ impl Default for Config {
             error_mode: ErrorModeSerde::default(),
             fragment_length: default_fragment_length(),
             natural_words: default_natural_words(),
+            daily_goal_minutes: default_daily_goal_minutes(),
         }
     }
 }
@@ -123,6 +133,7 @@ mod tests {
             error_mode: ErrorModeSerde::StopOnError,
             fragment_length: 120,
             natural_words: false,
+            daily_goal_minutes: 45,
         };
         let serialized = toml::to_string_pretty(&cfg).unwrap();
         let deserialized: Config = toml::from_str(&serialized).unwrap();
@@ -130,6 +141,7 @@ mod tests {
         assert_eq!(deserialized.error_mode, ErrorModeSerde::StopOnError);
         assert_eq!(deserialized.fragment_length, 120);
         assert!(!deserialized.natural_words);
+        assert_eq!(deserialized.daily_goal_minutes, 45);
     }
 
     #[test]
@@ -139,6 +151,7 @@ mod tests {
         assert_eq!(cfg.error_mode, ErrorModeSerde::ForgiveMistakes);
         assert_eq!(cfg.fragment_length, 100);
         assert!(cfg.natural_words);
+        assert_eq!(cfg.daily_goal_minutes, 30);
     }
 
     #[test]

@@ -20,6 +20,14 @@ fn default_legacy_minutes() -> Option<u32> {
     None
 }
 
+fn default_last_lesson() -> Option<SavedLessonResult> {
+    None
+}
+
+fn default_lesson_history() -> Vec<SavedLessonResult> {
+    Vec::new()
+}
+
 /// Compute YYYY-MM-DD for the current Unix day (UTC).
 ///
 /// Uses Howard Hinnant's "civil_from_days" algorithm (public domain) to map
@@ -63,6 +71,16 @@ pub struct SavedKeyStats {
     pub recent_times_ms: Vec<u64>,
 }
 
+/// Persisted form of a completed lesson's headline stats. The
+/// `newly_unlocked` field is intentionally not stored — the "+letter
+/// unlocked!" callout is meant to celebrate the event in the moment,
+/// not re-show on every app launch.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedLessonResult {
+    pub wpm: f64,
+    pub accuracy: f64,
+}
+
 /// All persistent stats, serialized to JSON.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SavedStats {
@@ -96,6 +114,17 @@ pub struct SavedStats {
     /// Empty string means "no day yet" (e.g. fresh install or v1 migration).
     #[serde(default = "default_today_date")]
     pub today_date: String,
+
+    /// Most recent completed lesson's headline stats. The dashboard's
+    /// Metrics row reads from this; persisting it means a fresh launch
+    /// shows the previous session's numbers instead of "—" placeholders.
+    #[serde(default = "default_last_lesson")]
+    pub last_lesson: Option<SavedLessonResult>,
+
+    /// Rolling history used to compute deltas (vs running mean) in the
+    /// dashboard. Kept short — the engine itself caps this at 50 entries.
+    #[serde(default = "default_lesson_history")]
+    pub lesson_history: Vec<SavedLessonResult>,
 }
 
 impl SavedStats {
@@ -224,6 +253,14 @@ mod tests {
             today_seconds_practiced: 1042,
             today_minutes_practiced: None,
             today_date: "2026-03-29".to_string(),
+            last_lesson: Some(SavedLessonResult {
+                wpm: 42.5,
+                accuracy: 96.0,
+            }),
+            lesson_history: vec![
+                SavedLessonResult { wpm: 38.0, accuracy: 94.0 },
+                SavedLessonResult { wpm: 42.5, accuracy: 96.0 },
+            ],
         };
 
         let json = serde_json::to_string_pretty(&stats).unwrap();
@@ -235,6 +272,10 @@ mod tests {
         assert_eq!(deserialized.keys.len(), 2);
         assert_eq!(deserialized.today_seconds_practiced, 1042);
         assert_eq!(deserialized.today_date, "2026-03-29");
+        let last = deserialized.last_lesson.as_ref().unwrap();
+        assert!((last.wpm - 42.5).abs() < f64::EPSILON);
+        assert!((last.accuracy - 96.0).abs() < f64::EPSILON);
+        assert_eq!(deserialized.lesson_history.len(), 2);
 
         let e_stats = deserialized.keys.get(&'e').unwrap();
         assert_eq!(e_stats.attempts, 100);
@@ -253,10 +294,12 @@ mod tests {
         }"#;
         let stats: SavedStats = serde_json::from_str(json).unwrap();
         assert_eq!(stats.version, 1);
-        // v1 JSON omits the daily-goal fields → serde fills defaults.
+        // v1 JSON omits the daily-goal + lesson fields → serde fills defaults.
         assert_eq!(stats.today_seconds_practiced, 0);
         assert_eq!(stats.today_minutes_practiced, None);
         assert_eq!(stats.today_date, "");
+        assert!(stats.last_lesson.is_none());
+        assert!(stats.lesson_history.is_empty());
     }
 
     #[test]

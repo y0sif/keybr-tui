@@ -36,6 +36,11 @@ const LABEL_WIDTH: usize = 12;
 /// Width of the daily-goal bar in cells.
 const GOAL_BAR_CELLS: u32 = 10;
 
+/// Total width of the dashboard's content band: 12 cols for the label
+/// plus 78 cols for 26 three-cell heatmap tiles. All four rows align
+/// to this band so the labels sit in the same column on every line.
+const DASHBOARD_WIDTH: u16 = LABEL_WIDTH as u16 + 26 * key_bar::TILE_WIDTH;
+
 pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     // 5 single-line rows: 4 dashboard sections + 1 callout row that's
     // either blank or shows the "+letter unlocked!" message.
@@ -63,19 +68,19 @@ fn label_span(text: &str) -> Span<'static> {
     Span::styled(label, Style::default().fg(Color::DarkGray))
 }
 
-/// Wrap a row's content in the same horizontal centering used by the
-/// typing area, so labels and content sit under the text the user is
-/// typing rather than scattered to one edge.
+/// The dashboard's content sits in a fixed-width band centered in the
+/// frame. The band is sized to fit the widest row (the heatmap), so
+/// every other row's label lines up underneath the heatmap's label and
+/// nothing gets clipped on standard-width terminals.
 fn centered_inner(area: Rect) -> Rect {
-    let cols = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(10),
-            Constraint::Percentage(80),
-            Constraint::Percentage(10),
-        ])
-        .split(area);
-    cols[1]
+    let inner_w = DASHBOARD_WIDTH.min(area.width);
+    let left_margin = area.width.saturating_sub(inner_w) / 2;
+    Rect {
+        x: area.x + left_margin,
+        y: area.y,
+        width: inner_w,
+        height: area.height,
+    }
 }
 
 /// Render one row by combining the label and its content spans.
