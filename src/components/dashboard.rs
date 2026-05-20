@@ -26,7 +26,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{lesson_score, App, LessonResult};
+use crate::app::{lesson_score, App};
 use crate::components::key_bar;
 
 /// Width reserved for row labels (e.g. "Metrics:    "). Keeps section
@@ -94,37 +94,42 @@ fn render_metrics_row(app: &App, frame: &mut Frame, area: Rect) {
     let strong = Style::default().fg(Color::White);
     let sep = Span::styled("  ·  ", dim);
 
-    let (wpm, accuracy, is_last): (f64, f64, bool) = match &app.last_lesson {
-        Some(LessonResult { wpm, accuracy, .. }) => (*wpm, *accuracy, true),
-        // No completed lesson yet — show in-progress values so the
-        // first lesson isn't a sea of dashes.
-        None => (app.lesson_wpm(), app.lesson_accuracy(), false),
+    let mut spans: Vec<Span<'static>> = vec![label_span("Metrics:")];
+
+    // The metrics row reflects the most recently *completed* lesson — never
+    // in-progress values. Falling back to live `lesson_wpm()` / `lesson_accuracy()`
+    // here made the row flicker every keystroke on the first lesson, which
+    // read as buggy. Until at least one lesson is done, show placeholders.
+    let Some(last) = &app.last_lesson else {
+        spans.push(Span::styled("—  wpm", dim));
+        spans.push(sep.clone());
+        spans.push(Span::styled("—  acc", dim));
+        spans.push(sep);
+        spans.push(Span::styled("—", dim));
+        render_row(frame, area, spans);
+        return;
     };
+
+    let wpm = last.wpm;
+    let accuracy = last.accuracy;
     let score = lesson_score(wpm, accuracy);
 
-    let mut spans: Vec<Span<'static>> = vec![label_span("Metrics:")];
     spans.push(Span::styled(format!("{:>3.0} wpm", wpm), strong));
-    if is_last {
-        if let Some(d) = delta_span(wpm, app.prev_mean_wpm()) {
-            spans.push(Span::raw(" "));
-            spans.push(d);
-        }
+    if let Some(d) = delta_span(wpm, app.prev_mean_wpm()) {
+        spans.push(Span::raw(" "));
+        spans.push(d);
     }
     spans.push(sep.clone());
     spans.push(Span::styled(format!("{:>3.0}% acc", accuracy), strong));
-    if is_last {
-        if let Some(d) = delta_span(accuracy, app.prev_mean_accuracy()) {
-            spans.push(Span::raw(" "));
-            spans.push(d);
-        }
+    if let Some(d) = delta_span(accuracy, app.prev_mean_accuracy()) {
+        spans.push(Span::raw(" "));
+        spans.push(d);
     }
     spans.push(sep);
     spans.push(Span::styled(format_score(score), strong));
-    if is_last {
-        if let Some(d) = delta_span(score, app.prev_mean_score()) {
-            spans.push(Span::raw(" "));
-            spans.push(d);
-        }
+    if let Some(d) = delta_span(score, app.prev_mean_score()) {
+        spans.push(Span::raw(" "));
+        spans.push(d);
     }
 
     render_row(frame, area, spans);

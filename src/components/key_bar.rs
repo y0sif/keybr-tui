@@ -39,50 +39,33 @@ pub fn color_for(best_conf: f64, is_active: bool) -> Color {
     }
 }
 
-/// Pick a Unicode block character whose density mirrors `color_for`'s
-/// gradient. Pairing this with the letter gives each key a 2-cell "tile"
-/// look (a colored block followed by the letter), evoking keybr.com's
-/// colored backgrounds without using a real background color — keeps the
-/// brand-identity rule of "no custom bg colors" intact.
-pub fn tile_char(best_conf: f64, is_active: bool) -> char {
-    if !is_active {
-        return '·';
-    }
-    if best_conf >= 1.0 {
-        '█'
-    } else if best_conf >= 0.75 {
-        '▓'
-    } else if best_conf >= 0.5 {
-        '▒'
-    } else if best_conf >= 0.25 {
-        '░'
-    } else {
-        '·'
-    }
-}
-
-/// Build the 2-span tile for a single key (block char + uppercased letter).
-/// Used by both the all-keys row and the focused-key marker in the dashboard.
-pub fn key_tile_spans(key: char, best_conf: f64, is_active: bool, is_focused: bool) -> Vec<Span<'static>> {
-    let color = color_for(best_conf, is_active);
-    let tile = tile_char(best_conf, is_active);
+/// Build the 2-cell tile for a single key — a colored cell containing
+/// the uppercased letter with a leading space of padding. Uses a real
+/// terminal background color so the heatmap actually reads like
+/// keybr.com's tiles (the prior shade-character approach was hard to
+/// scan because the block sat *next to* the letter rather than under it).
+/// Background colors are intentionally scoped to the heatmap only — the
+/// typing area still defers to the terminal background per the brand rule.
+pub fn key_tile_spans(
+    key: char,
+    best_conf: f64,
+    is_active: bool,
+    is_focused: bool,
+) -> Vec<Span<'static>> {
+    let bg = color_for(best_conf, is_active);
     let letter = key.to_ascii_uppercase().to_string();
-
-    let mut block_style = Style::default().fg(color);
-    let mut letter_style = Style::default().fg(color);
+    // White foreground reads well against every ANSI color used by
+    // `color_for` (green, light-green, yellow, light-red, red, dark-gray).
+    let mut style = Style::default().bg(bg).fg(Color::White);
     if is_focused {
-        // Bold + underline marks the currently-focused key. Underline on
-        // both the block and the letter ties the two cells together
-        // visually so the marker reads as one unit.
-        block_style = block_style.add_modifier(Modifier::BOLD).add_modifier(Modifier::UNDERLINED);
-        letter_style = letter_style
+        style = style
             .add_modifier(Modifier::BOLD)
             .add_modifier(Modifier::UNDERLINED);
     }
 
     vec![
-        Span::styled(tile.to_string(), block_style),
-        Span::styled(letter, letter_style),
+        Span::styled(" ", style),
+        Span::styled(letter, style),
     ]
 }
 
@@ -152,21 +135,21 @@ mod tests {
     }
 
     #[test]
-    fn tile_char_matches_gradient() {
-        assert_eq!(tile_char(0.0, false), '·');
-        assert_eq!(tile_char(0.0, true), '·');
-        assert_eq!(tile_char(0.25, true), '░');
-        assert_eq!(tile_char(0.5, true), '▒');
-        assert_eq!(tile_char(0.75, true), '▓');
-        assert_eq!(tile_char(1.0, true), '█');
+    fn key_tile_spans_emits_padded_letter_with_bg() {
+        let spans = key_tile_spans('e', 1.0, true, false);
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0].content, " ");
+        assert_eq!(spans[1].content, "E");
+        // Background carries the confidence color so the cell reads as a tile.
+        assert_eq!(spans[1].style.bg, Some(Color::Green));
+        assert_eq!(spans[1].style.fg, Some(Color::White));
     }
 
     #[test]
-    fn key_tile_spans_emits_block_then_letter() {
-        let spans = key_tile_spans('e', 1.0, true, false);
-        assert_eq!(spans.len(), 2);
-        assert_eq!(spans[0].content, "█");
-        assert_eq!(spans[1].content, "E");
+    fn locked_tile_uses_dark_gray_bg() {
+        let spans = key_tile_spans('z', 0.0, false, false);
+        assert_eq!(spans[0].style.bg, Some(Color::DarkGray));
+        assert_eq!(spans[1].style.bg, Some(Color::DarkGray));
     }
 
     #[test]
