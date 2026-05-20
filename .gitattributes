@@ -1,0 +1,9 @@
+* text=auto eol=lf
+*.rs text diff=rust
+*.toml text
+*.md text diff=markdown
+Cargo.lock linguist-generated=true
+data/* linguist-generated=true
+*.png binary
+*.jpg binary
+*.gif binary
