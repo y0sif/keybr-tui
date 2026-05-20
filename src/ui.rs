@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{App, AppScreen, LessonResult};
+use crate::app::{App, AppScreen, ErrorMode, LessonResult};
 use crate::components::{key_bar, menu, progress, settings, stats_bar, typing_area};
 
 pub fn view(app: &App, frame: &mut Frame) {
@@ -40,7 +40,7 @@ fn render_typing_screen(app: &App, frame: &mut Frame) {
     render_progress_panel(app, frame, chunks[0]);
     key_bar::render(app, frame, chunks[1]);
     typing_area::render(app, frame, chunks[2]);
-    render_footer(frame, chunks[3]);
+    render_footer(app, frame, chunks[3]);
 }
 
 /// Row A — the inline progress panel.
@@ -122,12 +122,25 @@ fn render_progress_panel(app: &App, frame: &mut Frame, area: Rect) {
 }
 
 /// Row D — single-line footer with key hints, centered.
-fn render_footer(frame: &mut Frame, area: Rect) {
-    let text = "[Esc] menu · [Tab] mode · [Ctrl+C] quit";
-    let para = Paragraph::new(Line::from(Span::styled(
-        text,
-        Style::default().fg(Color::DarkGray),
-    )))
-    .alignment(Alignment::Center);
+///
+/// The mode segment makes the current error mode visible at a glance and
+/// shows what [Tab] will switch to next, so users always know which mode
+/// they're in without trial-and-error.
+fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
+    let dim = Style::default().fg(Color::DarkGray);
+    let active = Style::default().fg(Color::White);
+
+    let (current_label, next_label) = match app.error_mode {
+        ErrorMode::ForgiveMistakes => ("Forgive", "Stop"),
+        ErrorMode::StopOnError => ("Stop", "Forgive"),
+    };
+
+    let spans = vec![
+        Span::styled("[Esc] menu  ·  Mode: ", dim),
+        Span::styled(current_label, active),
+        Span::styled(format!("  [Tab → {}]  ·  [Ctrl+C] quit", next_label), dim),
+    ];
+
+    let para = Paragraph::new(Line::from(spans)).alignment(Alignment::Center);
     frame.render_widget(para, area);
 }
