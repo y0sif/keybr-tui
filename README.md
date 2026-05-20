@@ -1,5 +1,7 @@
 # keybr-tui
 
+[![CI](https://github.com/y0sif/keybr-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/y0sif/keybr-tui/actions/workflows/ci.yml) [![Crates.io](https://img.shields.io/crates/v/keybr-tui.svg)](https://crates.io/crates/keybr-tui) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![MSRV](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
+
 A terminal typing trainer with adaptive learning, inspired by [keybr.com](https://www.keybr.com).
 
 keybr-tui generates practice text using phonetic Markov chains and adapts to your weaknesses in real time. Letters are introduced progressively as you demonstrate proficiency, so you always practice what you need most.
@@ -20,13 +22,22 @@ keybr-tui generates practice text using phonetic Markov chains and adapts to you
 
 ### From crates.io
 
-```
+```bash
 cargo install keybr-tui
+```
+
+### Prebuilt binary
+
+Each tagged release on the [releases page](https://github.com/y0sif/keybr-tui/releases) ships prebuilt binaries for Linux (x86_64), macOS (Intel and Apple Silicon), and Windows (x86_64). Unix archives are `.tar.gz`, Windows is `.zip`.
+
+```bash
+tar -xzf keybr-tui-x86_64-unknown-linux-gnu.tar.gz
+./keybr-tui
 ```
 
 ### From source
 
-```
+```bash
 git clone https://github.com/y0sif/keybr-tui.git
 cd keybr-tui
 cargo install --path .
@@ -34,7 +45,7 @@ cargo install --path .
 
 ## Usage
 
-```
+```bash
 keybr-tui [OPTIONS]
 ```
 
@@ -68,11 +79,67 @@ keybr-tui uses a phonetic text generation algorithm ported from [keybr.com](http
 4. **Text generation**: A Markov chain trained on English phonetic patterns generates pronounceable pseudo-words using only your active letters, with bias toward the focus key.
 5. **Tracking**: Each keystroke's reaction time is recorded, filtered, and smoothed to update your per-key statistics.
 
+## Project Structure
+
+```text
+keybr-tui/
+├── src/
+│   ├── main.rs           # Entry point
+│   ├── app.rs            # Central state (MVU)
+│   ├── update.rs         # State transitions
+│   ├── ui.rs             # Rendering (read-only state)
+│   ├── events.rs         # Input + tick event channel
+│   ├── tui.rs            # Terminal setup/teardown
+│   ├── metrics.rs        # Per-key statistics
+│   ├── config.rs         # Config file parsing
+│   ├── persistence.rs    # Stats save/load
+│   ├── engine/           # Adaptive text generation
+│   └── components/       # UI widgets
+├── docs/                 # Architecture and reference
+└── .github/workflows/    # CI and release
+```
+
+See [docs/file_structure.md](docs/file_structure.md) for the full module responsibility breakdown.
+
+## Development
+
+Build:
+
+```bash
+cargo build
+```
+
+Run:
+
+```bash
+cargo run
+```
+
+Test:
+
+```bash
+cargo test
+```
+
+Format:
+
+```bash
+cargo fmt --all
+```
+
+Lint:
+
+```bash
+cargo clippy --all-targets -- -D warnings
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contribution workflow.
+
 ## Configuration
 
 Config file location (XDG on Linux):
 
-```
+```text
 ~/.config/keybr-tui/config.toml
 ```
 
@@ -88,8 +155,16 @@ Stats are saved separately in the data directory. Use `keybr-tui --data-dir` to 
 
 ## Screenshots
 
-<!-- TODO: Add terminal recording using asciinema or vhs -->
-*Coming soon: terminal recording of a typing session.*
+A terminal recording (asciinema/vhs) is on the roadmap. For now, run `cargo install keybr-tui` and try it.
+
+## Documentation
+
+- [docs/project_overview.md](docs/project_overview.md) — scope, goals, and tech stack
+- [docs/architecture.md](docs/architecture.md) — MVU architecture and event loop
+- [docs/file_structure.md](docs/file_structure.md) — module-by-module responsibilities
+- [docs/comparison.md](docs/comparison.md) — how keybr-tui compares to alternatives
+- [docs/faq.md](docs/faq.md) — frequently asked questions
+- [docs/troubleshooting.md](docs/troubleshooting.md) — common issues and fixes
 
 ## Credits
 
