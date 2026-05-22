@@ -258,8 +258,14 @@ mod tests {
                 accuracy: 96.0,
             }),
             lesson_history: vec![
-                SavedLessonResult { wpm: 38.0, accuracy: 94.0 },
-                SavedLessonResult { wpm: 42.5, accuracy: 96.0 },
+                SavedLessonResult {
+                    wpm: 38.0,
+                    accuracy: 94.0,
+                },
+                SavedLessonResult {
+                    wpm: 42.5,
+                    accuracy: 96.0,
+                },
             ],
         };
 

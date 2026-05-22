@@ -114,11 +114,9 @@ keybr-tui/
 │   ├── persistence.rs    # Stats save/load
 │   ├── engine/           # Adaptive text generation
 │   └── components/       # UI widgets
-├── docs/                 # Architecture and reference
+├── docs/                 # User-facing docs (comparison, FAQ, troubleshooting)
 └── .github/workflows/    # CI and release
 ```
-
-See [docs/file_structure.md](docs/file_structure.md) for the full module responsibility breakdown.
 
 ## Development
 
@@ -178,9 +176,6 @@ A terminal recording (asciinema/vhs) is on the roadmap. For now, run `cargo inst
 
 ## Documentation
 
-- [docs/project_overview.md](docs/project_overview.md) — scope, goals, and tech stack
-- [docs/architecture.md](docs/architecture.md) — MVU architecture and event loop
-- [docs/file_structure.md](docs/file_structure.md) — module-by-module responsibilities
 - [docs/comparison.md](docs/comparison.md) — how keybr-tui compares to alternatives
 - [docs/faq.md](docs/faq.md) — frequently asked questions
 - [docs/troubleshooting.md](docs/troubleshooting.md) — common issues and fixes

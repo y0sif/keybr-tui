@@ -280,7 +280,10 @@ impl App {
         if n < 2 {
             return None;
         }
-        let sum: f64 = self.lesson_history[..n - 1].iter().map(|r| r.accuracy).sum();
+        let sum: f64 = self.lesson_history[..n - 1]
+            .iter()
+            .map(|r| r.accuracy)
+            .sum();
         Some(sum / (n - 1) as f64)
     }
 

@@ -180,8 +180,8 @@ impl WordGenerator {
                 Some(' ') => break, // space = end of word
                 Some(c) => {
                     word.push(c);
-                    let idx = TransitionTable::char_to_idx(c)
-                        .expect("sampled char must be in alphabet");
+                    let idx =
+                        TransitionTable::char_to_idx(c).expect("sampled char must be in alphabet");
                     history.copy_within(1.., 0);
                     history[HISTORY_LEN - 1] = idx;
                 }

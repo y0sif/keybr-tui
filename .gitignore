@@ -3,3 +3,12 @@
 *.swo
 .DS_Store
 .claude/
+
+# Internal-only docs (kept locally for agent context, not published)
+/docs/plan/
+/docs/architecture.md
+/docs/brand_identity.md
+/docs/file_structure.md
+/docs/project_overview.md
+/docs/ratatui.md
+/docs/rust_reference.md

@@ -255,7 +255,11 @@ mod tests {
         let cur = stats.confidence(target_cpm);
         let best = stats.best_confidence(target_cpm);
         assert!(cur < 1.0, "current confidence should be < 1.0, got {}", cur);
-        assert!(best >= 1.0, "best confidence should be >= 1.0, got {}", best);
+        assert!(
+            best >= 1.0,
+            "best confidence should be >= 1.0, got {}",
+            best
+        );
     }
 
     #[test]
@@ -271,11 +275,7 @@ mod tests {
         let mut stats = KeyStats::default();
         stats.filtered_time_ms = 343.0;
         let wpm = stats.wpm().expect("should have a value");
-        assert!(
-            (wpm - 35.0).abs() < 0.1,
-            "expected ~35 WPM, got {}",
-            wpm
-        );
+        assert!((wpm - 35.0).abs() < 0.1, "expected ~35 WPM, got {}", wpm);
     }
 
     #[test]
@@ -283,11 +283,7 @@ mod tests {
         let mut stats = KeyStats::default();
         stats.best_filtered_time_ms = 343.0;
         let wpm = stats.best_wpm().expect("should have a value");
-        assert!(
-            (wpm - 35.0).abs() < 0.1,
-            "expected ~35 WPM, got {}",
-            wpm
-        );
+        assert!((wpm - 35.0).abs() < 0.1, "expected ~35 WPM, got {}", wpm);
     }
 
     #[test]

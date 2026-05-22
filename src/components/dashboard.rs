@@ -191,10 +191,7 @@ fn render_keys_row(app: &App, frame: &mut Frame, area: Rect) {
     let inner = centered_inner(area);
     let cols = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Length(LABEL_WIDTH as u16),
-            Constraint::Min(0),
-        ])
+        .constraints([Constraint::Length(LABEL_WIDTH as u16), Constraint::Min(0)])
         .split(inner);
 
     let label = Paragraph::new(Line::from(label_span("All keys:"))).alignment(Alignment::Left);
