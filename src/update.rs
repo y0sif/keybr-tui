@@ -131,14 +131,12 @@ fn handle_typing_key(app: &mut App, key: crossterm::event::KeyEvent) {
         }
 
         // Backspace — move cursor back and clear error mark
-        Backspace => {
-            if app.cursor_pos > 0 {
-                app.cursor_pos -= 1;
-                app.error_positions.remove(&app.cursor_pos);
-                app.first_attempt_correct.remove(&app.cursor_pos);
-                app.recovered_positions.remove(&app.cursor_pos);
-                app.key_target_start = Some(Instant::now());
-            }
+        Backspace if app.cursor_pos > 0 => {
+            app.cursor_pos -= 1;
+            app.error_positions.remove(&app.cursor_pos);
+            app.first_attempt_correct.remove(&app.cursor_pos);
+            app.recovered_positions.remove(&app.cursor_pos);
+            app.key_target_start = Some(Instant::now());
         }
 
         // Typing input — includes space
@@ -312,16 +310,15 @@ fn handle_settings_key(app: &mut App, key: crossterm::event::KeyEvent) {
             }
             auto_save_config(app);
         }
-        Enter => {
+        Enter
             // Toggle error mode on Enter when selected
-            if app.settings_selection == 1 {
+            if app.settings_selection == 1 => {
                 app.error_mode = match app.error_mode {
                     ErrorMode::ForgiveMistakes => ErrorMode::StopOnError,
                     ErrorMode::StopOnError => ErrorMode::ForgiveMistakes,
                 };
                 auto_save_config(app);
             }
-        }
         _ => {}
     }
 }
