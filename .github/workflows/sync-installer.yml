@@ -1,0 +1,42 @@
+name: Sync install.sh to gh-pages
+
+# Mirrors install.sh from main to gh-pages whenever it changes, so the
+# `curl | sh` recipe served from https://y0sif.github.io/keybr-tui/install.sh
+# never drifts from the canonical installer.
+
+on:
+  push:
+    branches: [main]
+    paths: [install.sh]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout gh-pages
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          fetch-depth: 0
+
+      - name: Copy install.sh from main
+        run: |
+          set -euo pipefail
+          git fetch origin main --depth=1
+          git checkout origin/main -- install.sh
+
+      - name: Commit and push if changed
+        run: |
+          set -euo pipefail
+          if git diff --quiet --cached HEAD -- install.sh; then
+            echo "install.sh already in sync with main"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Sync install.sh from main"
+          git push origin gh-pages

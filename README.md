@@ -1,6 +1,17 @@
+```
+ _              _
+| | _____ _   _| |__  _ __
+| |/ / _ \ | | | '_ \| '__|
+|   <  __/ |_| | |_) | |
+|_|\_\___|\__, |_.__/|_|
+          |___/
+
+  type. learn. master.
+```
+
 # keybr-tui
 
-[![CI](https://github.com/y0sif/keybr-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/y0sif/keybr-tui/actions/workflows/ci.yml) [![Crates.io](https://img.shields.io/crates/v/keybr-tui.svg)](https://crates.io/crates/keybr-tui) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![MSRV](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
+[![CI](https://github.com/y0sif/keybr-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/y0sif/keybr-tui/actions/workflows/ci.yml) [![Crates.io](https://img.shields.io/crates/v/keybr-tui.svg)](https://crates.io/crates/keybr-tui) [![docs.rs](https://img.shields.io/docsrs/keybr-tui)](https://docs.rs/keybr-tui) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![MSRV](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
 
 A terminal typing trainer with adaptive learning, inspired by [keybr.com](https://www.keybr.com).
 
@@ -19,6 +30,14 @@ keybr-tui generates practice text using phonetic Markov chains and adapts to you
 - **Minimalist terminal-native UI** built with ratatui
 
 ## Install
+
+### Quick install (Linux & macOS)
+
+```bash
+curl -sSf https://y0sif.github.io/keybr-tui/install.sh | sh
+```
+
+The script downloads the latest prebuilt binary for your platform and installs it to `/usr/local/bin` (or `~/.local/bin` if not root). Pin a specific version with `KEYBR_TUI_VERSION=v0.1.0`.
 
 ### From crates.io
 

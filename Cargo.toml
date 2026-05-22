@@ -13,6 +13,10 @@ keywords = ["typing", "tui", "terminal", "keyboard", "trainer"]
 categories = ["command-line-utilities"]
 readme = "README.md"
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [dependencies]
 ratatui = "0.29"
 crossterm = "0.28"
