@@ -9,8 +9,8 @@ use crate::metrics::KeyStats;
 ///   * the **unlock order** — subsequent letters are added one at a time, left-to-right,
 ///     as the user reaches the target WPM (by historical best) for every active key.
 ///
-/// The focused key is also chosen by walking this order: the first active letter that
-/// hasn't yet hit the target speed (by historical best) is what we practice next.
+/// The focused key is independent of this order: it's the active letter with the
+/// lowest historical-best confidence still below target (this order only breaks ties).
 pub const UNLOCK_ORDER: &[char] = &[
     'e', 'n', 'i', 'a', 'r', 'l', // starter set (6)
     't', 'o', 's', 'u', 'd', 'y', 'c', 'g', 'h', 'p', 'm', 'k', 'b', 'w', 'f', 'z', 'v', 'x', 'q',
@@ -19,13 +19,25 @@ pub const UNLOCK_ORDER: &[char] = &[
 
 const STARTER_COUNT: usize = 6;
 
+/// Number of letters force-included beyond the starter set for a given
+/// `alphabet_size` ∈ [0.0, 1.0] — keybr's `maxSize − minSize`, where
+/// `maxSize = minSize + round((26 − minSize) * alphabetSize)`.
+pub fn forced_extra_letters(alphabet_size: f64) -> usize {
+    ((UNLOCK_ORDER.len() - STARTER_COUNT) as f64 * alphabet_size.clamp(0.0, 1.0)).round() as usize
+}
+
 pub struct LetterScheduler {
     pub active_keys: Vec<char>,
     unlock_index: usize, // index of next letter to potentially unlock
+    /// Fraction of the non-starter alphabet to force-include regardless of
+    /// confidence, mirroring keybr's `alphabetSize` lesson setting.
+    /// 0.0 (default) keeps the pure earn-by-confidence progression; 1.0
+    /// includes all 26 letters from the start.
+    pub alphabet_size: f64,
     /// The key the generator must inject into every word.
-    /// Picked by walking `UNLOCK_ORDER` and taking the first active key whose
-    /// historical best confidence is still below target; falls back to current
-    /// weakest once every active key has graduated.
+    /// The active key with the lowest historical-best confidence below 1.0;
+    /// `None` once every active key has graduated (no boosted letter, like
+    /// keybr.com).
     pub focused_key: Option<char>,
 }
 
@@ -35,6 +47,7 @@ impl LetterScheduler {
         LetterScheduler {
             active_keys,
             unlock_index: STARTER_COUNT,
+            alphabet_size: 0.0,
             focused_key: None,
         }
     }
@@ -62,13 +75,35 @@ impl LetterScheduler {
     /// * **Include / unlock gate** — uses `best_confidence` so a key, once
     ///   learned, never re-locks after a bad session. A new key is unlocked
     ///   only when every currently-active key has `best_confidence >= 1.0`.
-    /// * **Focus phase 1 (fixed order)** — walk `UNLOCK_ORDER` left-to-right
-    ///   and return the first active key whose `best_confidence` is still
-    ///   below 1.0. Unpracticed keys (best 0.0) qualify naturally.
-    /// * **Focus phase 2 (fallback)** — only when every active key has
-    ///   graduated by best: pick the active key with the lowest *current*
-    ///   confidence, so maintenance practice tracks present weakness.
+    /// * **Focus** — among active keys with `best_confidence < 1.0`, pick
+    ///   the one with the *lowest* confidence (keybr sorts weakest-first in
+    ///   `GuidedLesson.update`). Unpracticed keys (best 0.0) qualify
+    ///   naturally. When every active key has graduated there is no focused
+    ///   key, and the generator places no per-word constraint.
     pub fn update(&mut self, stats: &HashMap<char, KeyStats>, target_cpm: f64) {
+        // FORCE-INCLUDE gate: mirror keybr's `alphabetSize` — every letter in
+        // `UNLOCK_ORDER[..maxSize]` is included regardless of confidence,
+        // where maxSize = STARTER_COUNT + round((26 − STARTER_COUNT) ×
+        // alphabet_size). Only the extras beyond the starter set are forced
+        // here: `new()` always includes the starters, and skipping them keeps
+        // alphabet_size = 0.0 a strict no-op (e.g. for old-save migrations).
+        // Deliberate deviation from keybr: once included, letters never
+        // re-lock when the setting is lowered, matching this codebase's
+        // no-relock philosophy for earned letters.
+        let max_size = STARTER_COUNT + forced_extra_letters(self.alphabet_size);
+        let mut forced_any = false;
+        for &letter in &UNLOCK_ORDER[STARTER_COUNT..max_size.min(UNLOCK_ORDER.len())] {
+            if !self.active_keys.contains(&letter) {
+                self.active_keys.push(letter);
+                forced_any = true;
+            }
+        }
+        if forced_any {
+            // Keep `unlock_index` consistent with the (possibly extended)
+            // active set so the earn gate below can't duplicate an unlock.
+            self.set_unlock_index_from_active();
+        }
+
         // INCLUDE gate: are all active keys "learned" by their historical best?
         let all_learned = self.active_keys.iter().all(|key| {
             stats
@@ -94,39 +129,23 @@ impl LetterScheduler {
             }
         }
 
-        // Build a set of active keys for fast lookup during the focus walk.
-        let active: std::collections::HashSet<char> = self.active_keys.iter().copied().collect();
-
-        // FOCUS phase 1: walk UNLOCK_ORDER, take the first active key whose
-        // historical best is still below target.
-        let phase1 = UNLOCK_ORDER.iter().copied().find(|c| {
-            if !active.contains(c) {
-                return false;
-            }
-            let best_conf = stats
-                .get(c)
-                .map(|s| s.best_confidence(target_cpm))
-                .unwrap_or(0.0);
-            best_conf < 1.0
-        });
-
-        self.focused_key = if let Some(key) = phase1 {
-            Some(key)
-        } else {
-            // FOCUS phase 2: every active key has graduated by best — fall back
-            // to "current weakest" using live (not best) confidence.
-            self.active_keys
-                .iter()
-                .map(|&key| {
-                    let conf = stats
-                        .get(&key)
-                        .map(|s| s.confidence(target_cpm))
-                        .unwrap_or(0.0);
-                    (key, conf)
-                })
-                .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
-                .map(|(key, _)| key)
-        };
+        // FOCUS: the active key with the lowest best confidence below 1.0.
+        // `active_keys` is in frequency order and `min_by` keeps the first
+        // minimum, matching keybr's stable weakest-first sort on ties
+        // (unpracticed keys all sit at 0.0). None once all have graduated.
+        self.focused_key = self
+            .active_keys
+            .iter()
+            .map(|&key| {
+                let conf = stats
+                    .get(&key)
+                    .map(|s| s.best_confidence(target_cpm))
+                    .unwrap_or(0.0);
+                (key, conf)
+            })
+            .filter(|&(_, conf)| conf < 1.0)
+            .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(key, _)| key);
     }
 }
 
@@ -228,13 +247,9 @@ mod tests {
         // the first of them in UNLOCK_ORDER, which is 'a'.
 
         sched.update(&stats, target_cpm);
-        assert!(sched.focused_key.is_some());
-        let focused = sched.focused_key.unwrap();
-        assert!(
-            ['a', 'r', 'l'].contains(&focused),
-            "focused key should be an unpracticed key, got '{}'",
-            focused
-        );
+        // All three unpracticed keys tie at confidence 0.0 — the stable
+        // tie-break keeps the first in frequency order, 'a'.
+        assert_eq!(sched.focused_key, Some('a'));
     }
 
     #[test]
@@ -263,12 +278,10 @@ mod tests {
     }
 
     #[test]
-    fn focus_walks_keybr_order() {
-        // Starters e, n, i, a, r, l are all active. Set e, n, r, l learned by
-        // best; leave i and a not learned by best. Walking UNLOCK_ORDER:
-        //   e → best ≥ 1.0, skip
-        //   n → best ≥ 1.0, skip
-        //   i → best < 1.0, pick
+    fn focus_picks_lowest_confidence_not_unlock_order() {
+        // Starters e, n, i, a, r, l are all active. 'i' and 'a' are both
+        // below target, but 'a' is weaker — keybr focuses the weakest key,
+        // not the first below-target letter in frequency order ('i').
         let mut sched = LetterScheduler::new();
         let target_cpm = 175.0;
         let target_time = 60_000.0 / target_cpm;
@@ -281,29 +294,26 @@ mod tests {
             ks.best_filtered_time_ms = 0.8 * target_time;
             stats.insert(key, ks);
         }
-        for &key in &['i', 'a'] {
+        for (key, slowdown) in [('i', 2.0), ('a', 3.0)] {
             let mut ks = KeyStats::default();
             ks.attempts = 30;
-            ks.filtered_time_ms = 2.0 * target_time;
-            ks.best_filtered_time_ms = 2.0 * target_time;
+            ks.filtered_time_ms = slowdown * target_time;
+            ks.best_filtered_time_ms = slowdown * target_time;
             stats.insert(key, ks);
         }
 
         sched.update(&stats, target_cpm);
         assert_eq!(sched.active_keys.len(), 6, "no unlock should fire here");
-        assert_eq!(sched.focused_key, Some('i'));
+        assert_eq!(sched.focused_key, Some('a'));
     }
 
     #[test]
-    fn focus_falls_back_to_current_when_all_learned_by_best() {
-        // Every active key has best_confidence >= 1.0, so Phase 1 returns None
-        // and Phase 2 picks the active key with the lowest CURRENT confidence,
-        // even if it has a great historical best.
-        //
-        // To prevent the unlock gate from continuously pulling in fresh keys
-        // (which would re-arm Phase 1 because the newly unlocked key has
-        // best 0.0), we unlock ALL letters up-front and feed stats for every
-        // single one — so the unlock cursor sits at the end of UNLOCK_ORDER.
+    fn focus_is_none_when_all_learned_by_best() {
+        // keybr's GuidedLesson only boosts a letter while some included key
+        // has bestConfidence < 1 — once every active key has graduated by
+        // best there is NO focused key, even if a key's current time has
+        // regressed. (Re-focusing on current weakness is keybr's non-default
+        // `recoverKeys` setting, which we don't implement.)
         let mut sched = LetterScheduler::new();
         sched.active_keys = UNLOCK_ORDER.to_vec();
         sched.set_unlock_index_from_active();
@@ -320,8 +330,8 @@ mod tests {
             ks.best_filtered_time_ms = 0.8 * target_time; // best learned
             stats.insert(key, ks);
         }
-        // …except 'n', which has a great historical best (so Phase 1 won't
-        // pick it) but a regressed current time — the worst current of the lot.
+        // …except 'n', whose current time has regressed badly. Its best is
+        // still under target, so it must NOT be re-focused.
         let n_stats = stats.get_mut(&'n').unwrap();
         n_stats.filtered_time_ms = 3.0 * target_time; // current: worst
         n_stats.best_filtered_time_ms = 0.5 * target_time; // best: fastest
@@ -330,8 +340,24 @@ mod tests {
 
         // Active set unchanged (every letter already unlocked, none left).
         assert_eq!(sched.active_keys.len(), UNLOCK_ORDER.len());
-        // Phase 1 returns None (all best >= 1.0), Phase 2 picks worst current.
-        assert_eq!(sched.focused_key, Some('n'));
+        assert_eq!(sched.focused_key, None);
+    }
+
+    #[test]
+    fn newly_unlocked_key_becomes_focus() {
+        // When all starters graduate and 't' unlocks, the fresh key has no
+        // stats (confidence 0.0) — it is immediately the weakest and gets
+        // the focus, exactly like keybr's brand-new letters.
+        let mut sched = LetterScheduler::new();
+        let target_cpm = 175.0;
+        let mut stats = HashMap::new();
+        for &key in &['e', 'n', 'i', 'a', 'r', 'l'] {
+            stats.insert(key, make_learned_stats(target_cpm));
+        }
+
+        sched.update(&stats, target_cpm);
+        assert!(sched.active_keys.contains(&'t'));
+        assert_eq!(sched.focused_key, Some('t'));
     }
 
     #[test]
@@ -357,6 +383,107 @@ mod tests {
         sched.update(&stats, target_cpm);
         assert_eq!(sched.active_keys.len(), 8);
         assert!(sched.active_keys.contains(&'o'));
+    }
+
+    #[test]
+    fn alphabet_size_zero_changes_nothing() {
+        // The default setting must leave the earn-by-confidence progression
+        // untouched: no force-includes with or without stats.
+        let mut sched = LetterScheduler::new();
+        assert_eq!(sched.alphabet_size, 0.0);
+
+        let stats = HashMap::new();
+        sched.update(&stats, 175.0);
+        assert_eq!(sched.active_keys, UNLOCK_ORDER[..STARTER_COUNT].to_vec());
+    }
+
+    #[test]
+    fn alphabet_size_half_forces_sixteen_letters() {
+        // maxSize = 6 + round((26 − 6) × 0.5) = 16 — forced regardless of
+        // confidence, in UNLOCK_ORDER order, even with no stats at all.
+        let mut sched = LetterScheduler::new();
+        sched.alphabet_size = 0.5;
+
+        let stats = HashMap::new();
+        sched.update(&stats, 175.0);
+
+        assert_eq!(sched.active_keys.len(), 16);
+        assert_eq!(sched.active_keys, UNLOCK_ORDER[..16].to_vec());
+    }
+
+    #[test]
+    fn forced_letters_do_not_break_earn_gate() {
+        // alphabet_size 0.1 forces 2 extra letters ('t', 'o'). Even with all
+        // starters learned, the next *earned* unlock ('s') must wait until
+        // the forced, unpracticed letters are learned too.
+        let mut sched = LetterScheduler::new();
+        sched.alphabet_size = 0.1;
+        let target_cpm = 175.0;
+        let mut stats = HashMap::new();
+        for &key in &['e', 'n', 'i', 'a', 'r', 'l'] {
+            stats.insert(key, make_learned_stats(target_cpm));
+        }
+
+        sched.update(&stats, target_cpm);
+        // Forced letters included, but no earned unlock: 't'/'o' are
+        // unpracticed, so the active set isn't all-learned.
+        assert_eq!(sched.active_keys, UNLOCK_ORDER[..8].to_vec());
+
+        // Once the forced letters are learned as well, the earn gate opens.
+        stats.insert('t', make_learned_stats(target_cpm));
+        stats.insert('o', make_learned_stats(target_cpm));
+        sched.update(&stats, target_cpm);
+        assert_eq!(sched.active_keys.len(), 9);
+        assert!(sched.active_keys.contains(&'s'));
+    }
+
+    #[test]
+    fn no_duplicates_when_forced_letters_already_earned() {
+        // 't' and 'o' were earned the normal way; raising alphabet_size to
+        // cover them (and more) must not re-add them.
+        let mut sched = LetterScheduler::new();
+        sched.active_keys = UNLOCK_ORDER[..8].to_vec(); // starters + t, o
+        sched.set_unlock_index_from_active();
+        sched.alphabet_size = 0.25; // maxSize = 6 + round(20 × 0.25) = 11
+
+        let stats = HashMap::new();
+        sched.update(&stats, 175.0);
+
+        assert_eq!(sched.active_keys, UNLOCK_ORDER[..11].to_vec());
+        let mut sorted = sched.active_keys.clone();
+        sorted.sort();
+        let mut dedup = sorted.clone();
+        dedup.dedup();
+        assert_eq!(sorted, dedup, "no duplicate force-includes");
+    }
+
+    #[test]
+    fn forced_unpracticed_letter_becomes_focus() {
+        // The focus pass runs over the whole active set, forced letters
+        // included: a forced letter with no stats sits at confidence 0.0 and
+        // immediately becomes the weakest (focused) key.
+        let mut sched = LetterScheduler::new();
+        sched.alphabet_size = 0.05; // maxSize = 6 + round(20 × 0.05) = 7 → 't'
+        let target_cpm = 175.0;
+        let mut stats = HashMap::new();
+        for &key in &['e', 'n', 'i', 'a', 'r', 'l'] {
+            stats.insert(key, make_learned_stats(target_cpm));
+        }
+
+        sched.update(&stats, target_cpm);
+        assert!(sched.active_keys.contains(&'t'));
+        assert_eq!(sched.focused_key, Some('t'));
+    }
+
+    #[test]
+    fn forced_extra_letters_formula() {
+        assert_eq!(forced_extra_letters(0.0), 0);
+        assert_eq!(forced_extra_letters(0.05), 1);
+        assert_eq!(forced_extra_letters(0.5), 10);
+        assert_eq!(forced_extra_letters(1.0), 20);
+        // Out-of-range inputs are clamped.
+        assert_eq!(forced_extra_letters(-0.5), 0);
+        assert_eq!(forced_extra_letters(2.0), 20);
     }
 
     #[test]

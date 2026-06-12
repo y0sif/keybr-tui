@@ -111,6 +111,8 @@ fn main() -> color_eyre::Result<()> {
     app.fragment_length = config.fragment_length;
     app.natural_words = config.natural_words;
     app.daily_goal_minutes = config.daily_goal_minutes;
+    app.alphabet_size = config.alphabet_size;
+    app.scheduler.alphabet_size = config.alphabet_size;
     app.generator.set_natural_words(app.natural_words);
     let rx = setup_event_channel();
 
@@ -121,6 +123,11 @@ fn main() -> color_eyre::Result<()> {
             Ok(event) => update(&mut app, event),
             Err(_) => break,
         }
+
+        // `update` never touches the disk — it only raises save flags.
+        // Flushing here (including on the quit event, before the loop
+        // exits) is the single place user files get written.
+        app.flush_pending_saves();
     }
 
     tui::restore()?;

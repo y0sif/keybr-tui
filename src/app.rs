@@ -99,6 +99,10 @@ pub struct App {
     pub natural_words: bool,
     /// Daily practice goal in minutes. 0 hides the daily-goal indicator.
     pub daily_goal_minutes: u32,
+    /// Fraction of the non-starter alphabet to force-include regardless of
+    /// confidence (keybr's `alphabetSize`, in [0.0, 1.0]). Mirrored onto
+    /// `scheduler.alphabet_size` so the next scheduler update applies it.
+    pub alphabet_size: f64,
 
     // --- Daily-goal tracker (persisted) ---
     /// Wall-clock seconds practiced today. Display as minutes; storing in
@@ -112,6 +116,14 @@ pub struct App {
     pub menu_selection: usize,
     /// Selected item index in the settings screen.
     pub settings_selection: usize,
+
+    // --- Deferred persistence (MVU purity) ---
+    /// Set by `update` when stats should be written; main's event loop
+    /// performs the write and clears the flag. `update` itself never does
+    /// disk I/O, so tests driving it can't touch the user's real files.
+    pub pending_stats_save: bool,
+    /// Same as `pending_stats_save`, for the config file.
+    pub pending_config_save: bool,
 }
 
 impl App {
@@ -229,10 +241,31 @@ impl App {
             fragment_length: 100,
             natural_words: true,
             daily_goal_minutes: 30,
+            alphabet_size: 0.0,
             today_seconds_practiced,
             today_date,
             menu_selection: 0,
             settings_selection: 0,
+            pending_stats_save: false,
+            pending_config_save: false,
+        }
+    }
+
+    /// Perform any saves requested by `update`, clearing the flags.
+    /// Called from main's event loop — the only place that writes to disk —
+    /// logging errors to stderr without crashing.
+    pub fn flush_pending_saves(&mut self) {
+        if self.pending_stats_save {
+            self.pending_stats_save = false;
+            if let Err(e) = self.to_saved_stats().save() {
+                eprintln!("Warning: failed to save stats: {e}");
+            }
+        }
+        if self.pending_config_save {
+            self.pending_config_save = false;
+            if let Err(e) = self.to_config().save() {
+                eprintln!("Warning: failed to save config: {e}");
+            }
         }
     }
 
@@ -431,6 +464,7 @@ impl App {
             fragment_length: self.fragment_length,
             natural_words: self.natural_words,
             daily_goal_minutes: self.daily_goal_minutes,
+            alphabet_size: self.alphabet_size,
         }
     }
 }
