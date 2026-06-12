@@ -8,20 +8,17 @@ use crate::components::settings::SETTINGS_COUNT;
 use crate::events::AppEvent;
 use crate::persistence::today_date_string;
 
-/// Save stats to disk, logging errors to stderr without crashing.
-fn auto_save_stats(app: &App) {
-    let saved = app.to_saved_stats();
-    if let Err(e) = saved.save() {
-        eprintln!("Warning: failed to save stats: {e}");
-    }
+/// Request a stats save. `update` never touches the disk itself — main's
+/// event loop performs the actual write after the event is processed.
+/// This keeps the MVU update layer pure and, crucially, stops unit tests
+/// that drive `update` from clobbering the user's real stats file.
+fn request_stats_save(app: &mut App) {
+    app.pending_stats_save = true;
 }
 
-/// Save config to disk, logging errors to stderr without crashing.
-fn auto_save_config(app: &App) {
-    let cfg = app.to_config();
-    if let Err(e) = cfg.save() {
-        eprintln!("Warning: failed to save config: {e}");
-    }
+/// Request a config save (see `request_stats_save` for why it's deferred).
+fn request_config_save(app: &mut App) {
+    app.pending_config_save = true;
 }
 
 /// Increment `today_seconds_practiced` by `lesson_seconds`, after checking
@@ -50,7 +47,7 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
 
     // Global: Ctrl+C always quits
     if key.code == Char('c') && key.modifiers == KeyModifiers::CONTROL {
-        auto_save_stats(app);
+        request_stats_save(app);
         app.running = false;
         return;
     }
@@ -95,14 +92,14 @@ fn handle_menu_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 }
                 3 => {
                     // Quit
-                    auto_save_stats(app);
+                    request_stats_save(app);
                     app.running = false;
                 }
                 _ => {}
             }
         }
         Char('q') | Esc => {
-            auto_save_stats(app);
+            request_stats_save(app);
             app.running = false;
         }
         _ => {}
@@ -117,7 +114,7 @@ fn handle_typing_key(app: &mut App, key: crossterm::event::KeyEvent) {
     match key.code {
         Esc => {
             // Esc during typing goes to menu, not quit
-            auto_save_stats(app);
+            request_stats_save(app);
             app.screen = AppScreen::Menu;
         }
 
@@ -127,7 +124,7 @@ fn handle_typing_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 ErrorMode::ForgiveMistakes => ErrorMode::StopOnError,
                 ErrorMode::StopOnError => ErrorMode::ForgiveMistakes,
             };
-            auto_save_config(app);
+            request_config_save(app);
         }
 
         // Backspace — move cursor back and clear error mark
@@ -198,7 +195,7 @@ fn handle_typed_char(app: &mut App, typed: char) {
                 .unwrap_or(0);
             app.finish_lesson();
             tick_daily_goal(app, lesson_seconds);
-            auto_save_stats(app);
+            request_stats_save(app);
         }
     } else {
         let pos = app.cursor_pos;
@@ -227,7 +224,7 @@ fn handle_typed_char(app: &mut App, typed: char) {
                         .unwrap_or(0);
                     app.finish_lesson();
                     tick_daily_goal(app, lesson_seconds);
-                    auto_save_stats(app);
+                    request_stats_save(app);
                 }
             }
             ErrorMode::StopOnError => {
@@ -253,7 +250,7 @@ fn handle_settings_key(app: &mut App, key: crossterm::event::KeyEvent) {
 
     match key.code {
         Esc => {
-            auto_save_config(app);
+            request_config_save(app);
             app.screen = AppScreen::Menu;
         }
         Up => {
@@ -292,7 +289,7 @@ fn handle_settings_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 }
                 _ => {}
             }
-            auto_save_config(app);
+            request_config_save(app);
         }
         Right => {
             match app.settings_selection {
@@ -319,7 +316,7 @@ fn handle_settings_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 }
                 _ => {}
             }
-            auto_save_config(app);
+            request_config_save(app);
         }
         Enter
             // Toggle error mode on Enter when selected
@@ -328,7 +325,7 @@ fn handle_settings_key(app: &mut App, key: crossterm::event::KeyEvent) {
                     ErrorMode::ForgiveMistakes => ErrorMode::StopOnError,
                     ErrorMode::StopOnError => ErrorMode::ForgiveMistakes,
                 };
-                auto_save_config(app);
+                request_config_save(app);
             }
         _ => {}
     }
@@ -634,5 +631,49 @@ mod tests {
             update(&mut app, AppEvent::Key(make_key(KeyCode::Left)));
         }
         assert_eq!(app.alphabet_size, 0.0);
+    }
+
+    // --- Deferred persistence: update must only raise flags, never write ---
+
+    #[test]
+    fn quit_raises_stats_save_flag() {
+        let mut app = App::new();
+        assert!(!app.pending_stats_save);
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Esc)));
+        assert!(!app.running);
+        assert!(app.pending_stats_save, "quit must request a stats save");
+    }
+
+    #[test]
+    fn settings_change_raises_config_save_flag() {
+        let mut app = App::new();
+        app.screen = AppScreen::Settings;
+        app.settings_selection = 0;
+        assert!(!app.pending_config_save);
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Right)));
+        assert!(app.pending_config_save);
+        assert!(!app.pending_stats_save);
+    }
+
+    #[test]
+    fn error_mode_toggle_raises_config_save_flag() {
+        let mut app = make_test_app("ab");
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Tab)));
+        assert!(app.pending_config_save);
+    }
+
+    #[test]
+    fn finishing_lesson_raises_stats_save_flag() {
+        let mut app = make_test_app("a");
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Char('a'))));
+        assert!(app.pending_stats_save);
+    }
+
+    #[test]
+    fn esc_from_typing_raises_stats_save_flag() {
+        let mut app = make_test_app("abc");
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Esc)));
+        assert_eq!(app.screen, AppScreen::Menu);
+        assert!(app.pending_stats_save);
     }
 }

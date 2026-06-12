@@ -123,6 +123,11 @@ fn main() -> color_eyre::Result<()> {
             Ok(event) => update(&mut app, event),
             Err(_) => break,
         }
+
+        // `update` never touches the disk — it only raises save flags.
+        // Flushing here (including on the quit event, before the loop
+        // exits) is the single place user files get written.
+        app.flush_pending_saves();
     }
 
     tui::restore()?;
