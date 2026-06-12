@@ -317,6 +317,12 @@ impl App {
 
         let old_count = self.scheduler.active_keys.len();
 
+        // Fold each key's lesson-mean latency into its smoothed time before
+        // the scheduler reads confidences — keybr updates stats per result.
+        for stats in self.per_key_stats.values_mut() {
+            stats.finish_lesson();
+        }
+
         // Update scheduler with current stats
         self.scheduler.update(&self.per_key_stats, self.target_cpm);
 

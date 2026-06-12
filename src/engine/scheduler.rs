@@ -150,6 +150,7 @@ mod tests {
         for _ in 0..15 {
             stats.record_hit(fast_time);
         }
+        stats.finish_lesson();
         let _ = target_cpm;
         stats
     }
@@ -159,6 +160,7 @@ mod tests {
         for _ in 0..15 {
             stats.record_hit(600); // 600ms — slow
         }
+        stats.finish_lesson();
         stats
     }
 
