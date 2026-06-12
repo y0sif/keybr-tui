@@ -3,6 +3,7 @@ mod components;
 mod config;
 mod engine;
 mod events;
+mod import;
 mod metrics;
 mod persistence;
 mod tui;
@@ -37,6 +38,15 @@ struct Cli {
     /// Print the data directory path and exit.
     #[arg(long)]
     data_dir: bool,
+
+    /// Import a keybr.com data export (typing-data.json) and exit.
+    /// Rebuilds per-key stats and unlocked letters from the full history.
+    #[arg(long, value_name = "FILE")]
+    import: Option<std::path::PathBuf>,
+
+    /// With --import: replace existing stats (a .bak backup is written).
+    #[arg(long)]
+    force: bool,
 }
 
 fn main() -> color_eyre::Result<()> {
@@ -55,6 +65,14 @@ fn main() -> color_eyre::Result<()> {
             None => eprintln!("Could not determine data directory for this platform."),
         }
         return Ok(());
+    }
+
+    // --import: replay a keybr.com export into stats.json and exit
+    if let Some(ref import_path) = cli.import {
+        let config = Config::load();
+        let target_wpm = cli.target_wpm.unwrap_or(config.target_wpm);
+        let target_cpm = target_wpm as f64 * 5.0;
+        return import::run_import(import_path, target_cpm, cli.force);
     }
 
     // --reset: delete stats file and continue fresh
