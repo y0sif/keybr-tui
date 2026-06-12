@@ -98,7 +98,9 @@ The importer replays every session through the same per-key smoothing keybr.com
 uses, so your unlocked letters, per-key speeds, and focus letter come out exactly
 as the website computed them. Since your target speed setting is not part of the
 export, pass `--target-wpm <N>` alongside `--import` if you use a non-default
-target on keybr.com — the unlocked set is derived against it.
+target on keybr.com — the unlocked set is derived against it (with no flag, the
+target saved in your config is used, so adjusting Settings between two imports
+changes what counts as "learned"; re-import any time to re-derive).
 
 Sessions from non-English layouts are skipped (this TUI is English-only for now),
 and existing local stats are never overwritten unless you pass `--force`, which

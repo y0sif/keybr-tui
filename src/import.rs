@@ -258,12 +258,14 @@ pub fn run_import(path: &Path, target_cpm: f64, force: bool) -> color_eyre::Resu
         summary.imported, summary.total, summary.skipped_layout, summary.skipped_invalid
     );
     println!(
-        "Unlocked letters: {}/26{}",
+        "Unlocked letters: {}/26{} — derived against your {:.0} WPM target \
+         (from --target-wpm or config.toml; changing it re-derives, like keybr.com).",
         summary.unlocked_letters,
         summary
             .focused_key
             .map(|c| format!(" (current focus: '{c}')"))
-            .unwrap_or_default()
+            .unwrap_or_default(),
+        target_cpm / 5.0
     );
     println!(
         "Total practice time: {:.1} hours across {} sessions.",
