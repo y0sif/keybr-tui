@@ -9,7 +9,7 @@ use ratatui::{
 use crate::app::{App, ErrorMode};
 
 /// Settings items the user can navigate between.
-pub const SETTINGS_COUNT: usize = 3;
+pub const SETTINGS_COUNT: usize = 4;
 
 pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let v_chunks = Layout::default()
@@ -98,6 +98,29 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     lines.push(Line::from(vec![
         Span::styled(format!("{}Fragment Length     ", frag_marker), frag_style),
         Span::styled(format!("[  {}  ]", app.fragment_length), frag_style),
+        Span::styled(
+            "     Left/Right to adjust",
+            Style::default().fg(Color::DarkGray),
+        ),
+    ]));
+
+    // Alphabet Size (extra letters force-included beyond the 6 starters)
+    let alpha_style = if app.settings_selection == 3 {
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let alpha_marker = if app.settings_selection == 3 {
+        "> "
+    } else {
+        "  "
+    };
+    let extra = crate::engine::scheduler::forced_extra_letters(app.alphabet_size);
+    lines.push(Line::from(vec![
+        Span::styled(format!("{}Alphabet size       ", alpha_marker), alpha_style),
+        Span::styled(format!("[  +{extra} letters  ]"), alpha_style),
         Span::styled(
             "     Left/Right to adjust",
             Style::default().fg(Color::DarkGray),

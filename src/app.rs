@@ -99,6 +99,10 @@ pub struct App {
     pub natural_words: bool,
     /// Daily practice goal in minutes. 0 hides the daily-goal indicator.
     pub daily_goal_minutes: u32,
+    /// Fraction of the non-starter alphabet to force-include regardless of
+    /// confidence (keybr's `alphabetSize`, in [0.0, 1.0]). Mirrored onto
+    /// `scheduler.alphabet_size` so the next scheduler update applies it.
+    pub alphabet_size: f64,
 
     // --- Daily-goal tracker (persisted) ---
     /// Wall-clock seconds practiced today. Display as minutes; storing in
@@ -229,6 +233,7 @@ impl App {
             fragment_length: 100,
             natural_words: true,
             daily_goal_minutes: 30,
+            alphabet_size: 0.0,
             today_seconds_practiced,
             today_date,
             menu_selection: 0,
@@ -431,6 +436,7 @@ impl App {
             fragment_length: self.fragment_length,
             natural_words: self.natural_words,
             daily_goal_minutes: self.daily_goal_minutes,
+            alphabet_size: self.alphabet_size,
         }
     }
 }

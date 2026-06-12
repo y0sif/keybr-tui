@@ -284,6 +284,12 @@ fn handle_settings_key(app: &mut App, key: crossterm::event::KeyEvent) {
                     // Decrease fragment length
                     app.fragment_length = app.fragment_length.saturating_sub(10).max(20);
                 }
+                3 => {
+                    // Decrease alphabet size (one forced letter per 0.05 step).
+                    // Round to 2 decimals so repeated steps don't drift.
+                    app.alphabet_size = ((app.alphabet_size - 0.05).max(0.0) * 100.0).round() / 100.0;
+                    app.scheduler.alphabet_size = app.alphabet_size;
+                }
                 _ => {}
             }
             auto_save_config(app);
@@ -305,6 +311,11 @@ fn handle_settings_key(app: &mut App, key: crossterm::event::KeyEvent) {
                 2 => {
                     // Increase fragment length
                     app.fragment_length = (app.fragment_length + 10).min(500);
+                }
+                3 => {
+                    // Increase alphabet size (one forced letter per 0.05 step).
+                    app.alphabet_size = ((app.alphabet_size + 0.05).min(1.0) * 100.0).round() / 100.0;
+                    app.scheduler.alphabet_size = app.alphabet_size;
                 }
                 _ => {}
             }
@@ -590,5 +601,38 @@ mod tests {
         assert_eq!(app.fragment_length, initial + 10);
         update(&mut app, AppEvent::Key(make_key(KeyCode::Left)));
         assert_eq!(app.fragment_length, initial);
+    }
+
+    #[test]
+    fn settings_adjusts_alphabet_size() {
+        let mut app = App::new();
+        app.screen = AppScreen::Settings;
+        app.settings_selection = 3;
+        assert_eq!(app.alphabet_size, 0.0);
+
+        // One step right: +0.05, mirrored onto the scheduler.
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Right)));
+        assert_eq!(app.alphabet_size, 0.05);
+        assert_eq!(app.scheduler.alphabet_size, 0.05);
+
+        // Back left to the floor — and never below 0.0.
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Left)));
+        assert_eq!(app.alphabet_size, 0.0);
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Left)));
+        assert_eq!(app.alphabet_size, 0.0);
+        assert_eq!(app.scheduler.alphabet_size, 0.0);
+
+        // Saturates at 1.0 (20 steps from 0.0, then a few more).
+        for _ in 0..25 {
+            update(&mut app, AppEvent::Key(make_key(KeyCode::Right)));
+        }
+        assert_eq!(app.alphabet_size, 1.0);
+        assert_eq!(app.scheduler.alphabet_size, 1.0);
+
+        // And back down to the floor without drift.
+        for _ in 0..25 {
+            update(&mut app, AppEvent::Key(make_key(KeyCode::Left)));
+        }
+        assert_eq!(app.alphabet_size, 0.0);
     }
 }
