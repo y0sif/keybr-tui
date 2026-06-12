@@ -9,8 +9,8 @@ use crate::metrics::KeyStats;
 ///   * the **unlock order** — subsequent letters are added one at a time, left-to-right,
 ///     as the user reaches the target WPM (by historical best) for every active key.
 ///
-/// The focused key is also chosen by walking this order: the first active letter that
-/// hasn't yet hit the target speed (by historical best) is what we practice next.
+/// The focused key is independent of this order: it's the active letter with the
+/// lowest historical-best confidence still below target (this order only breaks ties).
 pub const UNLOCK_ORDER: &[char] = &[
     'e', 'n', 'i', 'a', 'r', 'l', // starter set (6)
     't', 'o', 's', 'u', 'd', 'y', 'c', 'g', 'h', 'p', 'm', 'k', 'b', 'w', 'f', 'z', 'v', 'x', 'q',
@@ -23,9 +23,9 @@ pub struct LetterScheduler {
     pub active_keys: Vec<char>,
     unlock_index: usize, // index of next letter to potentially unlock
     /// The key the generator must inject into every word.
-    /// Picked by walking `UNLOCK_ORDER` and taking the first active key whose
-    /// historical best confidence is still below target; falls back to current
-    /// weakest once every active key has graduated.
+    /// The active key with the lowest historical-best confidence below 1.0;
+    /// `None` once every active key has graduated (no boosted letter, like
+    /// keybr.com).
     pub focused_key: Option<char>,
 }
 
@@ -62,12 +62,11 @@ impl LetterScheduler {
     /// * **Include / unlock gate** — uses `best_confidence` so a key, once
     ///   learned, never re-locks after a bad session. A new key is unlocked
     ///   only when every currently-active key has `best_confidence >= 1.0`.
-    /// * **Focus phase 1 (fixed order)** — walk `UNLOCK_ORDER` left-to-right
-    ///   and return the first active key whose `best_confidence` is still
-    ///   below 1.0. Unpracticed keys (best 0.0) qualify naturally.
-    /// * **Focus phase 2 (fallback)** — only when every active key has
-    ///   graduated by best: pick the active key with the lowest *current*
-    ///   confidence, so maintenance practice tracks present weakness.
+    /// * **Focus** — among active keys with `best_confidence < 1.0`, pick
+    ///   the one with the *lowest* confidence (keybr sorts weakest-first in
+    ///   `GuidedLesson.update`). Unpracticed keys (best 0.0) qualify
+    ///   naturally. When every active key has graduated there is no focused
+    ///   key, and the generator places no per-word constraint.
     pub fn update(&mut self, stats: &HashMap<char, KeyStats>, target_cpm: f64) {
         // INCLUDE gate: are all active keys "learned" by their historical best?
         let all_learned = self.active_keys.iter().all(|key| {
@@ -94,39 +93,23 @@ impl LetterScheduler {
             }
         }
 
-        // Build a set of active keys for fast lookup during the focus walk.
-        let active: std::collections::HashSet<char> = self.active_keys.iter().copied().collect();
-
-        // FOCUS phase 1: walk UNLOCK_ORDER, take the first active key whose
-        // historical best is still below target.
-        let phase1 = UNLOCK_ORDER.iter().copied().find(|c| {
-            if !active.contains(c) {
-                return false;
-            }
-            let best_conf = stats
-                .get(c)
-                .map(|s| s.best_confidence(target_cpm))
-                .unwrap_or(0.0);
-            best_conf < 1.0
-        });
-
-        self.focused_key = if let Some(key) = phase1 {
-            Some(key)
-        } else {
-            // FOCUS phase 2: every active key has graduated by best — fall back
-            // to "current weakest" using live (not best) confidence.
-            self.active_keys
-                .iter()
-                .map(|&key| {
-                    let conf = stats
-                        .get(&key)
-                        .map(|s| s.confidence(target_cpm))
-                        .unwrap_or(0.0);
-                    (key, conf)
-                })
-                .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
-                .map(|(key, _)| key)
-        };
+        // FOCUS: the active key with the lowest best confidence below 1.0.
+        // `active_keys` is in frequency order and `min_by` keeps the first
+        // minimum, matching keybr's stable weakest-first sort on ties
+        // (unpracticed keys all sit at 0.0). None once all have graduated.
+        self.focused_key = self
+            .active_keys
+            .iter()
+            .map(|&key| {
+                let conf = stats
+                    .get(&key)
+                    .map(|s| s.best_confidence(target_cpm))
+                    .unwrap_or(0.0);
+                (key, conf)
+            })
+            .filter(|&(_, conf)| conf < 1.0)
+            .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(key, _)| key);
     }
 }
 
@@ -228,13 +211,9 @@ mod tests {
         // the first of them in UNLOCK_ORDER, which is 'a'.
 
         sched.update(&stats, target_cpm);
-        assert!(sched.focused_key.is_some());
-        let focused = sched.focused_key.unwrap();
-        assert!(
-            ['a', 'r', 'l'].contains(&focused),
-            "focused key should be an unpracticed key, got '{}'",
-            focused
-        );
+        // All three unpracticed keys tie at confidence 0.0 — the stable
+        // tie-break keeps the first in frequency order, 'a'.
+        assert_eq!(sched.focused_key, Some('a'));
     }
 
     #[test]
@@ -263,12 +242,10 @@ mod tests {
     }
 
     #[test]
-    fn focus_walks_keybr_order() {
-        // Starters e, n, i, a, r, l are all active. Set e, n, r, l learned by
-        // best; leave i and a not learned by best. Walking UNLOCK_ORDER:
-        //   e → best ≥ 1.0, skip
-        //   n → best ≥ 1.0, skip
-        //   i → best < 1.0, pick
+    fn focus_picks_lowest_confidence_not_unlock_order() {
+        // Starters e, n, i, a, r, l are all active. 'i' and 'a' are both
+        // below target, but 'a' is weaker — keybr focuses the weakest key,
+        // not the first below-target letter in frequency order ('i').
         let mut sched = LetterScheduler::new();
         let target_cpm = 175.0;
         let target_time = 60_000.0 / target_cpm;
@@ -281,29 +258,26 @@ mod tests {
             ks.best_filtered_time_ms = 0.8 * target_time;
             stats.insert(key, ks);
         }
-        for &key in &['i', 'a'] {
+        for (key, slowdown) in [('i', 2.0), ('a', 3.0)] {
             let mut ks = KeyStats::default();
             ks.attempts = 30;
-            ks.filtered_time_ms = 2.0 * target_time;
-            ks.best_filtered_time_ms = 2.0 * target_time;
+            ks.filtered_time_ms = slowdown * target_time;
+            ks.best_filtered_time_ms = slowdown * target_time;
             stats.insert(key, ks);
         }
 
         sched.update(&stats, target_cpm);
         assert_eq!(sched.active_keys.len(), 6, "no unlock should fire here");
-        assert_eq!(sched.focused_key, Some('i'));
+        assert_eq!(sched.focused_key, Some('a'));
     }
 
     #[test]
-    fn focus_falls_back_to_current_when_all_learned_by_best() {
-        // Every active key has best_confidence >= 1.0, so Phase 1 returns None
-        // and Phase 2 picks the active key with the lowest CURRENT confidence,
-        // even if it has a great historical best.
-        //
-        // To prevent the unlock gate from continuously pulling in fresh keys
-        // (which would re-arm Phase 1 because the newly unlocked key has
-        // best 0.0), we unlock ALL letters up-front and feed stats for every
-        // single one — so the unlock cursor sits at the end of UNLOCK_ORDER.
+    fn focus_is_none_when_all_learned_by_best() {
+        // keybr's GuidedLesson only boosts a letter while some included key
+        // has bestConfidence < 1 — once every active key has graduated by
+        // best there is NO focused key, even if a key's current time has
+        // regressed. (Re-focusing on current weakness is keybr's non-default
+        // `recoverKeys` setting, which we don't implement.)
         let mut sched = LetterScheduler::new();
         sched.active_keys = UNLOCK_ORDER.to_vec();
         sched.set_unlock_index_from_active();
@@ -320,8 +294,8 @@ mod tests {
             ks.best_filtered_time_ms = 0.8 * target_time; // best learned
             stats.insert(key, ks);
         }
-        // …except 'n', which has a great historical best (so Phase 1 won't
-        // pick it) but a regressed current time — the worst current of the lot.
+        // …except 'n', whose current time has regressed badly. Its best is
+        // still under target, so it must NOT be re-focused.
         let n_stats = stats.get_mut(&'n').unwrap();
         n_stats.filtered_time_ms = 3.0 * target_time; // current: worst
         n_stats.best_filtered_time_ms = 0.5 * target_time; // best: fastest
@@ -330,8 +304,24 @@ mod tests {
 
         // Active set unchanged (every letter already unlocked, none left).
         assert_eq!(sched.active_keys.len(), UNLOCK_ORDER.len());
-        // Phase 1 returns None (all best >= 1.0), Phase 2 picks worst current.
-        assert_eq!(sched.focused_key, Some('n'));
+        assert_eq!(sched.focused_key, None);
+    }
+
+    #[test]
+    fn newly_unlocked_key_becomes_focus() {
+        // When all starters graduate and 't' unlocks, the fresh key has no
+        // stats (confidence 0.0) — it is immediately the weakest and gets
+        // the focus, exactly like keybr's brand-new letters.
+        let mut sched = LetterScheduler::new();
+        let target_cpm = 175.0;
+        let mut stats = HashMap::new();
+        for &key in &['e', 'n', 'i', 'a', 'r', 'l'] {
+            stats.insert(key, make_learned_stats(target_cpm));
+        }
+
+        sched.update(&stats, target_cpm);
+        assert!(sched.active_keys.contains(&'t'));
+        assert_eq!(sched.focused_key, Some('t'));
     }
 
     #[test]

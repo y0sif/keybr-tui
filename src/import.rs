@@ -514,9 +514,8 @@ mod tests {
         let (saved, summary) = replay(&[record(samples)], 175.0);
         assert_eq!(summary.unlocked_letters, 26);
         assert_eq!(saved.unlocked_letters.len(), 26);
-        // All learned by best → focus falls back to current-weakest, which
-        // is still some letter (never None once stats exist).
-        assert!(summary.focused_key.is_some());
+        // All learned by best → no boosted letter, exactly like keybr.
+        assert_eq!(summary.focused_key, None);
     }
 
     #[test]
