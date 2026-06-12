@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-06-12
+
+### Added
+
+- Import your keybr.com practice history: `keybr-tui --import typing-data.json` replays
+  the full export through keybr's own algorithm (per-key EMA over session means,
+  historical-best tracking, validity filtering) and reconstructs your unlocked letters,
+  per-key speeds, and focus letter so you can continue in the terminal where the website
+  left off. `--force` replaces existing stats and always writes a `stats.json.bak` backup.
+- The import summary states which target speed the unlock derivation used, since the
+  unlocked set is re-derived against the current target (just like keybr.com).
+- `alphabet_size` setting (Settings screen + config.toml), mirroring keybr.com's
+  alphabetSize: force-include up to 20 extra letters beyond the starter six, regardless
+  of confidence. Defaults to 0 (pure earn-by-confidence progression).
+
+### Fixed
+
+- Per-key smoothing now matches keybr.com exactly: the exponential moving average is
+  applied once per lesson to each key's mean latency, not on every keystroke (which
+  adapted roughly 10x too fast).
+- Focus-key selection now matches keybr.com: the weakest active key (lowest historical-best
+  confidence below target) is boosted, instead of the first below-target key in unlock
+  order — and once every active key is learned there is no boosted key at all.
+- Running `cargo test` no longer overwrites your real config and stats: the update layer
+  only raises save flags now, and the main event loop is the single place user files are
+  written.
+
 ## [0.1.0] - 2026-03-29
 
 ### Added

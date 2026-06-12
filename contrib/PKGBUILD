@@ -1,6 +1,6 @@
 # Maintainer: y0sif <yosif at outbond dot io>
 pkgname=keybr-tui
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="A terminal typing trainer inspired by keybr.com with adaptive learning"
 arch=('x86_64')
