@@ -116,6 +116,14 @@ pub struct App {
     pub menu_selection: usize,
     /// Selected item index in the settings screen.
     pub settings_selection: usize,
+
+    // --- Deferred persistence (MVU purity) ---
+    /// Set by `update` when stats should be written; main's event loop
+    /// performs the write and clears the flag. `update` itself never does
+    /// disk I/O, so tests driving it can't touch the user's real files.
+    pub pending_stats_save: bool,
+    /// Same as `pending_stats_save`, for the config file.
+    pub pending_config_save: bool,
 }
 
 impl App {
@@ -238,6 +246,26 @@ impl App {
             today_date,
             menu_selection: 0,
             settings_selection: 0,
+            pending_stats_save: false,
+            pending_config_save: false,
+        }
+    }
+
+    /// Perform any saves requested by `update`, clearing the flags.
+    /// Called from main's event loop — the only place that writes to disk —
+    /// logging errors to stderr without crashing.
+    pub fn flush_pending_saves(&mut self) {
+        if self.pending_stats_save {
+            self.pending_stats_save = false;
+            if let Err(e) = self.to_saved_stats().save() {
+                eprintln!("Warning: failed to save stats: {e}");
+            }
+        }
+        if self.pending_config_save {
+            self.pending_config_save = false;
+            if let Err(e) = self.to_config().save() {
+                eprintln!("Warning: failed to save config: {e}");
+            }
         }
     }
 
