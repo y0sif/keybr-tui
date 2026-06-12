@@ -76,8 +76,35 @@ keybr-tui [OPTIONS]
 | `--error-mode <MODE>` | `move-on` (default) or `stop-on-error` |
 | `--reset` | Delete saved stats and start fresh |
 | `--data-dir` | Print the data directory path and exit |
+| `--import <FILE>` | Import a keybr.com data export and exit (see below) |
+| `--force` | With `--import`: replace existing stats (a `.bak` backup is kept) |
 | `--help` | Show help |
 | `--version` | Show version |
+
+### Migrating from keybr.com
+
+If you've been practicing on [keybr.com](https://www.keybr.com), you can carry your
+full learning state over and continue in the terminal:
+
+1. On keybr.com, open your profile page and click **Download data** — you'll get a
+   `typing-data.json` file with your complete practice history.
+2. Import it:
+
+   ```bash
+   keybr-tui --import typing-data.json
+   ```
+
+The importer replays every session through the same per-key smoothing keybr.com
+uses, so your unlocked letters, per-key speeds, and focus letter come out exactly
+as the website computed them. Since your target speed setting is not part of the
+export, pass `--target-wpm <N>` alongside `--import` if you use a non-default
+target on keybr.com — the unlocked set is derived against it (with no flag, the
+target saved in your config is used, so adjusting Settings between two imports
+changes what counts as "learned"; re-import any time to re-derive).
+
+Sessions from non-English layouts are skipped (this TUI is English-only for now),
+and existing local stats are never overwritten unless you pass `--force`, which
+still writes a `stats.json.bak` backup first.
 
 ### Keyboard Shortcuts
 
@@ -96,7 +123,7 @@ keybr-tui uses a phonetic text generation algorithm ported from [keybr.com](http
 2. **Unlocking**: When all active letters reach sufficient confidence, a new letter is unlocked from a frequency-ordered list.
 3. **Focus key**: The weakest key among your active set becomes the "focus key" and appears more frequently in generated text.
 4. **Text generation**: A Markov chain trained on English phonetic patterns generates pronounceable pseudo-words using only your active letters, with bias toward the focus key.
-5. **Tracking**: Each keystroke's reaction time is recorded, filtered, and smoothed to update your per-key statistics.
+5. **Tracking**: Each keystroke's reaction time is recorded; at the end of each lesson, every key's mean latency feeds an exponential moving average — the same per-result smoothing keybr.com applies.
 
 ## Project Structure
 

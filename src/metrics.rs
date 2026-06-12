@@ -7,10 +7,17 @@ pub struct KeyStats {
     pub errors: u32,
     /// Most recent reaction times in ms (capped at last 20 samples).
     pub reaction_times_ms: Vec<u64>,
-    /// Exponentially smoothed reaction time (alpha = 0.1).
+    /// Exponentially smoothed reaction time (alpha = 0.1), updated once per
+    /// lesson with the lesson's mean latency — keybr.com applies its filter
+    /// per result, not per keystroke.
     pub filtered_time_ms: f64,
     /// Historical minimum of the filtered time.
     pub best_filtered_time_ms: f64,
+    /// Sum of valid reaction times recorded during the current lesson.
+    /// Folded into `filtered_time_ms` by `finish_lesson()`; never persisted.
+    lesson_sum_ms: f64,
+    /// Number of samples behind `lesson_sum_ms`.
+    lesson_samples: u32,
 }
 
 impl KeyStats {
@@ -22,13 +29,34 @@ impl KeyStats {
         if self.reaction_times_ms.len() > 20 {
             self.reaction_times_ms.remove(0);
         }
+        self.lesson_sum_ms += reaction_ms as f64;
+        self.lesson_samples += 1;
+    }
 
-        // Exponential smoothing
+    /// Fold the finished lesson's mean latency into the smoothed time.
+    /// Mirrors keybr.com's `MutableKeyStats.append`, which runs the EMA once
+    /// per result on that session's mean `timeToType` for the key.
+    /// No-op for keys with no valid samples this lesson.
+    pub fn finish_lesson(&mut self) {
+        if self.lesson_samples == 0 {
+            return;
+        }
+        let mean = self.lesson_sum_ms / self.lesson_samples as f64;
+        self.lesson_sum_ms = 0.0;
+        self.lesson_samples = 0;
+        self.add_smoothed_sample(mean);
+    }
+
+    /// Apply one EMA update (alpha = 0.1, seeded verbatim by the first
+    /// sample) and refresh the historical best. Also used by `--import`
+    /// replay, where each keybr.com result contributes its per-session mean
+    /// as one sample.
+    pub fn add_smoothed_sample(&mut self, sample_ms: f64) {
         if self.filtered_time_ms == 0.0 {
-            self.filtered_time_ms = reaction_ms as f64;
+            self.filtered_time_ms = sample_ms;
         } else {
             self.filtered_time_ms =
-                Self::ALPHA * reaction_ms as f64 + (1.0 - Self::ALPHA) * self.filtered_time_ms;
+                Self::ALPHA * sample_ms + (1.0 - Self::ALPHA) * self.filtered_time_ms;
         }
 
         // Track best (historical minimum)
@@ -117,6 +145,14 @@ impl KeyStats {
 mod tests {
     use super::*;
 
+    /// Record a full lesson's worth of hits and close the lesson.
+    fn lesson(stats: &mut KeyStats, times: &[u64]) {
+        for &t in times {
+            stats.record_hit(t);
+        }
+        stats.finish_lesson();
+    }
+
     #[test]
     fn new_key_stats_are_empty() {
         let stats = KeyStats::default();
@@ -166,38 +202,96 @@ mod tests {
         assert_eq!(stats.reaction_times_ms.len(), 20);
     }
 
-    // --- New tests for exponential smoothing and confidence ---
+    // --- Per-lesson exponential smoothing and confidence ---
 
     #[test]
-    fn first_hit_sets_filtered_time() {
+    fn record_hit_alone_does_not_touch_filtered_time() {
+        // The EMA only moves at lesson boundaries (keybr parity).
         let mut stats = KeyStats::default();
         stats.record_hit(400);
+        assert!((stats.filtered_time_ms - 0.0).abs() < f64::EPSILON);
+        assert!((stats.best_filtered_time_ms - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn first_lesson_seeds_filtered_time() {
+        let mut stats = KeyStats::default();
+        lesson(&mut stats, &[400]);
         assert!((stats.filtered_time_ms - 400.0).abs() < f64::EPSILON);
     }
 
     #[test]
-    fn exponential_smoothing_applies() {
+    fn finish_lesson_uses_lesson_mean() {
         let mut stats = KeyStats::default();
-        stats.record_hit(400);
+        lesson(&mut stats, &[200, 400]);
+        // mean(200, 400) = 300 seeds the filter
+        assert!((stats.filtered_time_ms - 300.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn finish_lesson_without_samples_is_noop() {
+        let mut stats = KeyStats::default();
+        lesson(&mut stats, &[400]);
+        stats.finish_lesson(); // no hits since last lesson
+        assert!((stats.filtered_time_ms - 400.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn exponential_smoothing_applies_across_lessons() {
+        let mut stats = KeyStats::default();
+        lesson(&mut stats, &[400]);
         // filtered = 400.0
-        stats.record_hit(200);
+        lesson(&mut stats, &[200]);
         // filtered = 0.1 * 200 + 0.9 * 400 = 20 + 360 = 380
+        assert!((stats.filtered_time_ms - 380.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn lesson_accumulator_resets_between_lessons() {
+        let mut stats = KeyStats::default();
+        lesson(&mut stats, &[400]);
+        lesson(&mut stats, &[200]);
+        // If the accumulator leaked, lesson 2's mean would be 300 and
+        // filtered would be 0.1*300 + 0.9*400 = 390 instead of 380.
         assert!((stats.filtered_time_ms - 380.0).abs() < 0.01);
     }
 
     #[test]
     fn best_filtered_time_tracks_minimum() {
         let mut stats = KeyStats::default();
-        stats.record_hit(400);
+        lesson(&mut stats, &[400]);
         assert!((stats.best_filtered_time_ms - 400.0).abs() < f64::EPSILON);
 
-        // Keep hitting with fast times — filtered decreases
+        // Keep practicing with fast times — filtered decreases
         for _ in 0..50 {
-            stats.record_hit(200);
+            lesson(&mut stats, &[200]);
         }
-        // filtered_time should be close to 200 after many samples
+        // filtered_time should be close to 200 after many lessons
         assert!(stats.best_filtered_time_ms <= stats.filtered_time_ms + 0.01);
         assert!(stats.best_filtered_time_ms < 400.0);
+    }
+
+    #[test]
+    fn best_does_not_regress_when_slowing_down() {
+        let mut stats = KeyStats::default();
+        lesson(&mut stats, &[200]);
+        assert!((stats.best_filtered_time_ms - 200.0).abs() < f64::EPSILON);
+        lesson(&mut stats, &[800]);
+        // filtered regressed, best stays at its minimum
+        assert!(stats.filtered_time_ms > 200.0);
+        assert!((stats.best_filtered_time_ms - 200.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn add_smoothed_sample_matches_keybr_filter() {
+        // Direct EMA path used by import replay: seed, then alpha-blend.
+        let mut stats = KeyStats::default();
+        stats.add_smoothed_sample(500.0);
+        assert!((stats.filtered_time_ms - 500.0).abs() < f64::EPSILON);
+        stats.add_smoothed_sample(300.0);
+        // 0.1 * 300 + 0.9 * 500 = 480
+        assert!((stats.filtered_time_ms - 480.0).abs() < 0.01);
+        assert!((stats.best_filtered_time_ms - 480.0).abs() < 0.01);
     }
 
     #[test]
@@ -211,7 +305,7 @@ mod tests {
         let mut stats = KeyStats::default();
         // Target 175 CPM → target time ≈ 342.86ms
         // If filtered time is 200ms, confidence = 342.86 / 200 ≈ 1.71
-        stats.record_hit(200);
+        lesson(&mut stats, &[200]);
         let c = stats.confidence(175.0);
         assert!(
             c > 1.0,
@@ -224,7 +318,7 @@ mod tests {
     fn confidence_below_one_when_slow() {
         let mut stats = KeyStats::default();
         // If filtered time is 600ms, confidence = 342.86 / 600 ≈ 0.57
-        stats.record_hit(600);
+        lesson(&mut stats, &[600]);
         let c = stats.confidence(175.0);
         assert!(
             c < 1.0,
@@ -247,10 +341,12 @@ mod tests {
         // should be >= 1.0 even though current confidence is < 1.0.
         let target_cpm = 175.0;
         let target_time = 60_000.0 / target_cpm; // ≈ 342.86
-        let mut stats = KeyStats::default();
-        stats.filtered_time_ms = 2.0 * target_time; // current: regressed
-        stats.best_filtered_time_ms = 0.9 * target_time; // best: faster than target
-        stats.attempts = 50;
+        let stats = KeyStats {
+            filtered_time_ms: 2.0 * target_time,      // current: regressed
+            best_filtered_time_ms: 0.9 * target_time, // best: faster than target
+            attempts: 50,
+            ..KeyStats::default()
+        };
 
         let cur = stats.confidence(target_cpm);
         let best = stats.best_confidence(target_cpm);
@@ -272,16 +368,20 @@ mod tests {
     #[test]
     fn wpm_converts_filtered_time_to_wpm() {
         // 343 ms/char ≈ 175 CPM ≈ 35 WPM
-        let mut stats = KeyStats::default();
-        stats.filtered_time_ms = 343.0;
+        let stats = KeyStats {
+            filtered_time_ms: 343.0,
+            ..KeyStats::default()
+        };
         let wpm = stats.wpm().expect("should have a value");
         assert!((wpm - 35.0).abs() < 0.1, "expected ~35 WPM, got {}", wpm);
     }
 
     #[test]
     fn best_wpm_converts_best_filtered_time_to_wpm() {
-        let mut stats = KeyStats::default();
-        stats.best_filtered_time_ms = 343.0;
+        let stats = KeyStats {
+            best_filtered_time_ms: 343.0,
+            ..KeyStats::default()
+        };
         let wpm = stats.best_wpm().expect("should have a value");
         assert!((wpm - 35.0).abs() < 0.1, "expected ~35 WPM, got {}", wpm);
     }
@@ -289,11 +389,11 @@ mod tests {
     #[test]
     fn is_proficient_uses_confidence() {
         let mut stats = KeyStats::default();
-        stats.record_hit(200); // Fast — confidence > 1.0
+        lesson(&mut stats, &[200]); // Fast — confidence > 1.0
         assert!(stats.is_proficient(175.0));
 
         let mut slow_stats = KeyStats::default();
-        slow_stats.record_hit(600); // Slow — confidence < 1.0
+        lesson(&mut slow_stats, &[600]); // Slow — confidence < 1.0
         assert!(!slow_stats.is_proficient(175.0));
     }
 }
