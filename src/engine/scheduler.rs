@@ -19,9 +19,21 @@ pub const UNLOCK_ORDER: &[char] = &[
 
 const STARTER_COUNT: usize = 6;
 
+/// Number of letters force-included beyond the starter set for a given
+/// `alphabet_size` ∈ [0.0, 1.0] — keybr's `maxSize − minSize`, where
+/// `maxSize = minSize + round((26 − minSize) * alphabetSize)`.
+pub fn forced_extra_letters(alphabet_size: f64) -> usize {
+    ((UNLOCK_ORDER.len() - STARTER_COUNT) as f64 * alphabet_size.clamp(0.0, 1.0)).round() as usize
+}
+
 pub struct LetterScheduler {
     pub active_keys: Vec<char>,
     unlock_index: usize, // index of next letter to potentially unlock
+    /// Fraction of the non-starter alphabet to force-include regardless of
+    /// confidence, mirroring keybr's `alphabetSize` lesson setting.
+    /// 0.0 (default) keeps the pure earn-by-confidence progression; 1.0
+    /// includes all 26 letters from the start.
+    pub alphabet_size: f64,
     /// The key the generator must inject into every word.
     /// The active key with the lowest historical-best confidence below 1.0;
     /// `None` once every active key has graduated (no boosted letter, like
@@ -35,6 +47,7 @@ impl LetterScheduler {
         LetterScheduler {
             active_keys,
             unlock_index: STARTER_COUNT,
+            alphabet_size: 0.0,
             focused_key: None,
         }
     }
@@ -68,6 +81,29 @@ impl LetterScheduler {
     ///   naturally. When every active key has graduated there is no focused
     ///   key, and the generator places no per-word constraint.
     pub fn update(&mut self, stats: &HashMap<char, KeyStats>, target_cpm: f64) {
+        // FORCE-INCLUDE gate: mirror keybr's `alphabetSize` — every letter in
+        // `UNLOCK_ORDER[..maxSize]` is included regardless of confidence,
+        // where maxSize = STARTER_COUNT + round((26 − STARTER_COUNT) ×
+        // alphabet_size). Only the extras beyond the starter set are forced
+        // here: `new()` always includes the starters, and skipping them keeps
+        // alphabet_size = 0.0 a strict no-op (e.g. for old-save migrations).
+        // Deliberate deviation from keybr: once included, letters never
+        // re-lock when the setting is lowered, matching this codebase's
+        // no-relock philosophy for earned letters.
+        let max_size = STARTER_COUNT + forced_extra_letters(self.alphabet_size);
+        let mut forced_any = false;
+        for &letter in &UNLOCK_ORDER[STARTER_COUNT..max_size.min(UNLOCK_ORDER.len())] {
+            if !self.active_keys.contains(&letter) {
+                self.active_keys.push(letter);
+                forced_any = true;
+            }
+        }
+        if forced_any {
+            // Keep `unlock_index` consistent with the (possibly extended)
+            // active set so the earn gate below can't duplicate an unlock.
+            self.set_unlock_index_from_active();
+        }
+
         // INCLUDE gate: are all active keys "learned" by their historical best?
         let all_learned = self.active_keys.iter().all(|key| {
             stats
@@ -347,6 +383,107 @@ mod tests {
         sched.update(&stats, target_cpm);
         assert_eq!(sched.active_keys.len(), 8);
         assert!(sched.active_keys.contains(&'o'));
+    }
+
+    #[test]
+    fn alphabet_size_zero_changes_nothing() {
+        // The default setting must leave the earn-by-confidence progression
+        // untouched: no force-includes with or without stats.
+        let mut sched = LetterScheduler::new();
+        assert_eq!(sched.alphabet_size, 0.0);
+
+        let stats = HashMap::new();
+        sched.update(&stats, 175.0);
+        assert_eq!(sched.active_keys, UNLOCK_ORDER[..STARTER_COUNT].to_vec());
+    }
+
+    #[test]
+    fn alphabet_size_half_forces_sixteen_letters() {
+        // maxSize = 6 + round((26 − 6) × 0.5) = 16 — forced regardless of
+        // confidence, in UNLOCK_ORDER order, even with no stats at all.
+        let mut sched = LetterScheduler::new();
+        sched.alphabet_size = 0.5;
+
+        let stats = HashMap::new();
+        sched.update(&stats, 175.0);
+
+        assert_eq!(sched.active_keys.len(), 16);
+        assert_eq!(sched.active_keys, UNLOCK_ORDER[..16].to_vec());
+    }
+
+    #[test]
+    fn forced_letters_do_not_break_earn_gate() {
+        // alphabet_size 0.1 forces 2 extra letters ('t', 'o'). Even with all
+        // starters learned, the next *earned* unlock ('s') must wait until
+        // the forced, unpracticed letters are learned too.
+        let mut sched = LetterScheduler::new();
+        sched.alphabet_size = 0.1;
+        let target_cpm = 175.0;
+        let mut stats = HashMap::new();
+        for &key in &['e', 'n', 'i', 'a', 'r', 'l'] {
+            stats.insert(key, make_learned_stats(target_cpm));
+        }
+
+        sched.update(&stats, target_cpm);
+        // Forced letters included, but no earned unlock: 't'/'o' are
+        // unpracticed, so the active set isn't all-learned.
+        assert_eq!(sched.active_keys, UNLOCK_ORDER[..8].to_vec());
+
+        // Once the forced letters are learned as well, the earn gate opens.
+        stats.insert('t', make_learned_stats(target_cpm));
+        stats.insert('o', make_learned_stats(target_cpm));
+        sched.update(&stats, target_cpm);
+        assert_eq!(sched.active_keys.len(), 9);
+        assert!(sched.active_keys.contains(&'s'));
+    }
+
+    #[test]
+    fn no_duplicates_when_forced_letters_already_earned() {
+        // 't' and 'o' were earned the normal way; raising alphabet_size to
+        // cover them (and more) must not re-add them.
+        let mut sched = LetterScheduler::new();
+        sched.active_keys = UNLOCK_ORDER[..8].to_vec(); // starters + t, o
+        sched.set_unlock_index_from_active();
+        sched.alphabet_size = 0.25; // maxSize = 6 + round(20 × 0.25) = 11
+
+        let stats = HashMap::new();
+        sched.update(&stats, 175.0);
+
+        assert_eq!(sched.active_keys, UNLOCK_ORDER[..11].to_vec());
+        let mut sorted = sched.active_keys.clone();
+        sorted.sort();
+        let mut dedup = sorted.clone();
+        dedup.dedup();
+        assert_eq!(sorted, dedup, "no duplicate force-includes");
+    }
+
+    #[test]
+    fn forced_unpracticed_letter_becomes_focus() {
+        // The focus pass runs over the whole active set, forced letters
+        // included: a forced letter with no stats sits at confidence 0.0 and
+        // immediately becomes the weakest (focused) key.
+        let mut sched = LetterScheduler::new();
+        sched.alphabet_size = 0.05; // maxSize = 6 + round(20 × 0.05) = 7 → 't'
+        let target_cpm = 175.0;
+        let mut stats = HashMap::new();
+        for &key in &['e', 'n', 'i', 'a', 'r', 'l'] {
+            stats.insert(key, make_learned_stats(target_cpm));
+        }
+
+        sched.update(&stats, target_cpm);
+        assert!(sched.active_keys.contains(&'t'));
+        assert_eq!(sched.focused_key, Some('t'));
+    }
+
+    #[test]
+    fn forced_extra_letters_formula() {
+        assert_eq!(forced_extra_letters(0.0), 0);
+        assert_eq!(forced_extra_letters(0.05), 1);
+        assert_eq!(forced_extra_letters(0.5), 10);
+        assert_eq!(forced_extra_letters(1.0), 20);
+        // Out-of-range inputs are clamped.
+        assert_eq!(forced_extra_letters(-0.5), 0);
+        assert_eq!(forced_extra_letters(2.0), 20);
     }
 
     #[test]

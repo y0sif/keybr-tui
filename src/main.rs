@@ -111,6 +111,8 @@ fn main() -> color_eyre::Result<()> {
     app.fragment_length = config.fragment_length;
     app.natural_words = config.natural_words;
     app.daily_goal_minutes = config.daily_goal_minutes;
+    app.alphabet_size = config.alphabet_size;
+    app.scheduler.alphabet_size = config.alphabet_size;
     app.generator.set_natural_words(app.natural_words);
     let rx = setup_event_channel();
 
