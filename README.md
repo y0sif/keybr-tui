@@ -13,9 +13,13 @@
 
 [![CI](https://github.com/y0sif/keybr-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/y0sif/keybr-tui/actions/workflows/ci.yml) [![Crates.io](https://img.shields.io/crates/v/keybr-tui.svg)](https://crates.io/crates/keybr-tui) [![docs.rs](https://img.shields.io/docsrs/keybr-tui)](https://docs.rs/keybr-tui) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![MSRV](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
 
-A terminal typing trainer with adaptive learning, inspired by [keybr.com](https://www.keybr.com).
+**An adaptive terminal typing trainer that brings the [keybr.com](https://www.keybr.com) learning algorithm to your command line.**
 
-keybr-tui generates practice text using phonetic Markov chains and adapts to your weaknesses in real time. Letters are introduced progressively as you demonstrate proficiency, so you always practice what you need most.
+keybr-tui is a TUI typing tutor written in Rust. It generates practice text with phonetic Markov chains, tracks your speed and accuracy on every key, and unlocks letters progressively as you improve — so you always drill the keys holding you back. Everything runs offline, your stats stay in plain local files, and if you already practice on keybr.com you can [import your data](#migrating-from-keybrcom) and pick up exactly where you left off, in the terminal.
+
+## Why keybr-tui?
+
+keybr.com is the best adaptive typing trainer on the web — but it lives in a browser, behind an account, online. keybr-tui is for people who live in the terminal. It's a faithful port of keybr.com's adaptive engine (phonetic Markov text generation plus per-key confidence scheduling), running locally with no account, no network request, and no browser tab. Already have history on keybr.com? Export it and import it — your unlocked letters and per-key speeds come across untouched.
 
 ## Features
 
@@ -23,6 +27,7 @@ keybr-tui generates practice text using phonetic Markov chains and adapts to you
 - **Per-key confidence tracking** with exponential smoothing of reaction times
 - **Progressive letter unlocking** based on your performance against a target speed
 - **Persistent progress** across sessions (stats and config saved automatically)
+- **Import from keybr.com** — carry your full learning state over from a keybr.com data export
 - **Backspace and error recovery** with two error modes (forgive mistakes / stop on error)
 - **Lesson summary** after each practice round showing WPM, accuracy, and weakest keys
 - **Progress view** to review per-key statistics

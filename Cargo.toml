@@ -5,11 +5,11 @@ edition = "2021"
 rust-version = "1.75"
 authors = ["y0sif <yosif@outbond.io>"]
 license = "MIT"
-description = "A terminal typing trainer inspired by keybr.com with adaptive learning"
+description = "Adaptive terminal (TUI) typing trainer in Rust — a keybr.com algorithm port that runs offline and imports your keybr.com data"
 repository = "https://github.com/y0sif/keybr-tui"
-homepage = "https://github.com/y0sif/keybr-tui"
+homepage = "https://y0sif.github.io/keybr-tui/"
 documentation = "https://docs.rs/keybr-tui"
-keywords = ["typing", "tui", "terminal", "keyboard", "trainer"]
+keywords = ["typing", "typing-trainer", "tui", "terminal", "keybr"]
 categories = ["command-line-utilities"]
 readme = "README.md"
 
