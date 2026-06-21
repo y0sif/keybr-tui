@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://y0sif.github.io/keybr-tui/sitemap.xml
