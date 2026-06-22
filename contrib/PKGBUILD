@@ -1,8 +1,8 @@
 # Maintainer: y0sif <yosif at outbond dot io>
 pkgname=keybr-tui
-pkgver=0.2.0
+pkgver=0.2.1
 pkgrel=1
-pkgdesc="A terminal typing trainer inspired by keybr.com with adaptive learning"
+pkgdesc="Adaptive terminal (TUI) typing trainer in Rust that ports the keybr.com algorithm, runs offline, and imports your keybr.com data"
 arch=('x86_64')
 url="https://github.com/y0sif/keybr-tui"
 license=('MIT')

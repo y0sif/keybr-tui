@@ -24,12 +24,12 @@
 
         packages.default = pkgs.rustPlatform.buildRustPackage {
           pname = "keybr-tui";
-          version = "0.2.0";
+          version = "0.2.1";
           src = ./.;
           cargoLock.lockFile = ./Cargo.lock;
           meta = with pkgs.lib; {
-            description = "A terminal typing trainer inspired by keybr.com with adaptive learning";
-            homepage = "https://github.com/y0sif/keybr-tui";
+            description = "Adaptive terminal (TUI) typing trainer in Rust that ports the keybr.com algorithm, runs offline, and imports your keybr.com data";
+            homepage = "https://y0sif.github.io/keybr-tui/";
             license = licenses.mit;
             maintainers = [ ];
             mainProgram = "keybr-tui";

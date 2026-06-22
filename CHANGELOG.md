@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-06-22
+
+### Changed
+
+- Rewrote the README with its own identity instead of mirroring sibling projects:
+  a tighter intro, a "How it adapts" section leading with the adaptive engine,
+  collapsible install methods, and a full config-option reference. Development and
+  project-layout notes moved to `CONTRIBUTING.md`.
+- Keyword-dense crate metadata (`description`, `keywords`, `homepage`) for crates.io
+  and search discoverability.
+
+### Added
+
+- SEO landing page at <https://y0sif.github.io/keybr-tui/> with structured data
+  (`SoftwareApplication` and `FAQPage`), a sitemap, and Google Search Console
+  verification.
+
 ## [0.2.0] - 2026-06-12
 
 ### Added
