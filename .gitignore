@@ -3,6 +3,7 @@
 *.swo
 .DS_Store
 .claude/
+.worktrees/
 
 # Personal typing data exported from keybr.com — never commit
 /typing-data.json

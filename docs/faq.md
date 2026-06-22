@@ -8,6 +8,15 @@ keybr-tui is a terminal-native typing trainer built in Rust with ratatui. It use
 
 keybr-tui is a faithful port of the keybr.com adaptive algorithm to a terminal UI. It runs entirely offline, stores your stats on disk in plain files, and has no account, browser, or network requirement.
 
+## Can I import my keybr.com data into keybr-tui?
+
+Yes. On keybr.com, open your profile page and click **Download data** to get a
+`typing-data.json` file with your full practice history, then run
+`keybr-tui --import typing-data.json`. The importer replays every session through
+the same per-key smoothing keybr.com uses, so your unlocked letters, per-key
+speeds, and focus letter come out exactly as the website computed them. See the
+"Migrating from keybr.com" section of the README for the full details.
+
 ## Does keybr-tui work offline?
 
 Yes. keybr-tui never makes a network request. Text is generated locally by the phonetic Markov model, and all metrics are written to local files.
