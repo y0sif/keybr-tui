@@ -6,60 +6,34 @@
 |_|\_\___|\__, |_.__/|_|
           |___/
 
-  type. learn. master.
+  practice the keys that slow you down
 ```
 
 # keybr-tui
 
 [![CI](https://github.com/y0sif/keybr-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/y0sif/keybr-tui/actions/workflows/ci.yml) [![Crates.io](https://img.shields.io/crates/v/keybr-tui.svg)](https://crates.io/crates/keybr-tui) [![docs.rs](https://img.shields.io/docsrs/keybr-tui)](https://docs.rs/keybr-tui) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![MSRV](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
 
-**An adaptive terminal typing trainer that brings the [keybr.com](https://www.keybr.com) learning algorithm to your command line.**
-
-keybr-tui is a TUI typing tutor written in Rust. It generates practice text with phonetic Markov chains, tracks your speed and accuracy on every key, and unlocks letters progressively as you improve — so you always drill the keys holding you back. Everything runs offline, your stats stay in plain local files, and if you already practice on keybr.com you can [import your data](#migrating-from-keybrcom) and pick up exactly where you left off, in the terminal.
-
-## Why keybr-tui?
-
-keybr.com is the best adaptive typing trainer on the web — but it lives in a browser, behind an account, online. keybr-tui is for people who live in the terminal. It's a faithful port of keybr.com's adaptive engine (phonetic Markov text generation plus per-key confidence scheduling), running locally with no account, no network request, and no browser tab. Already have history on keybr.com? Export it and import it — your unlocked letters and per-key speeds come across untouched.
-
-## Features
-
-- **Adaptive text generation** using phonetic Markov chains (faithful port of the keybr.com algorithm)
-- **Per-key confidence tracking** with exponential smoothing of reaction times
-- **Progressive letter unlocking** based on your performance against a target speed
-- **Persistent progress** across sessions (stats and config saved automatically)
-- **Import from keybr.com** — carry your full learning state over from a keybr.com data export
-- **Backspace and error recovery** with two error modes (forgive mistakes / stop on error)
-- **Lesson summary** after each practice round showing WPM, accuracy, and weakest keys
-- **Progress view** to review per-key statistics
-- **Configurable settings** (target WPM, error mode, fragment length)
-- **Minimalist terminal-native UI** built with ratatui
+**Adaptive touch-typing practice for the terminal.** keybr-tui times every key you press, finds the ones slowing you down, and builds drills aimed straight at them. It is a faithful port of the [keybr.com](https://www.keybr.com) learning algorithm, runs entirely offline, and can [import your keybr.com history](#bring-your-keybrcom-history).
 
 ## Install
-
-### Quick install (Linux & macOS)
 
 ```bash
 curl -sSf https://y0sif.github.io/keybr-tui/install.sh | sh
 ```
 
-The script downloads the latest prebuilt binary for your platform and installs it to `/usr/local/bin` (or `~/.local/bin` if not root). Pin a specific version with `KEYBR_TUI_VERSION=v0.1.0`.
+The script installs the latest prebuilt binary for your platform. Prefer Cargo? Run `cargo install keybr-tui`.
 
-### From crates.io
+<details>
+<summary>Other ways to install (prebuilt binary, from source)</summary>
 
-```bash
-cargo install keybr-tui
-```
-
-### Prebuilt binary
-
-Each tagged release on the [releases page](https://github.com/y0sif/keybr-tui/releases) ships prebuilt binaries for Linux (x86_64), macOS (Intel and Apple Silicon), and Windows (x86_64). Unix archives are `.tar.gz`, Windows is `.zip`.
+**Prebuilt binary.** Every [release](https://github.com/y0sif/keybr-tui/releases) ships binaries for Linux (x86_64), macOS (Intel and Apple Silicon), and Windows (x86_64). Unix archives are `.tar.gz`, Windows is `.zip`.
 
 ```bash
 tar -xzf keybr-tui-x86_64-unknown-linux-gnu.tar.gz
 ./keybr-tui
 ```
 
-### From source
+**From source.**
 
 ```bash
 git clone https://github.com/y0sif/keybr-tui.git
@@ -67,132 +41,76 @@ cd keybr-tui
 cargo install --path .
 ```
 
+Pin a version for the install script with `KEYBR_TUI_VERSION=v0.2.0`.
+
+</details>
+
+## How it adapts
+
+Every session feeds a per-key model of how fast and accurately you type. keybr-tui reads that model to decide what you practice next.
+
+1. **Start small.** You begin with a handful of letters, not the whole keyboard.
+2. **Earn the rest.** A new letter unlocks only once your active set reaches a confidence threshold, measured against your target speed.
+3. **Drill the weak spot.** The slowest key in your active set becomes the focus key and shows up more often in the text you are given.
+4. **Read like words.** A phonetic Markov chain builds pronounceable pseudo-words from your active letters, so practice never feels like random noise.
+5. **Learn from each key.** Every keystroke's reaction time updates a smoothed per-key average, the same calculation keybr.com runs.
+
+Because the engine is a faithful port of the [keybr.com](https://github.com/aradzie/keybr.com) algorithm, the practice you get in the terminal matches what the website would give you.
+
+## Features
+
+| Feature | What you get |
+|---|---|
+| **Adaptive drills** | Phonetic Markov text built from your active letters, biased toward your weakest key |
+| **Per-key tracking** | Reaction times smoothed into a confidence score for every key |
+| **Progressive unlock** | Letters open up as you prove proficiency, in keybr.com's frequency order |
+| **keybr.com import** | Bring your full learning state over from a keybr.com data export |
+| **Two error modes** | Forgive mistakes and keep moving, or stop until you correct them |
+| **Lesson summary** | WPM, accuracy, and your weakest keys after every round |
+| **Local and offline** | No account, no network, stats saved as plain local files |
+| **Terminal-native** | Minimal ratatui interface in ANSI colors, no chrome in the way |
+
 ## Usage
 
 ```bash
 keybr-tui [OPTIONS]
 ```
 
-### Options
-
 | Flag | Description |
 |------|-------------|
-| `--target-wpm <N>` | Set target typing speed in words per minute (default: 35) |
+| `--target-wpm <N>` | Target typing speed in words per minute (default: 35) |
 | `--error-mode <MODE>` | `move-on` (default) or `stop-on-error` |
 | `--reset` | Delete saved stats and start fresh |
 | `--data-dir` | Print the data directory path and exit |
 | `--import <FILE>` | Import a keybr.com data export and exit (see below) |
-| `--force` | With `--import`: replace existing stats (a `.bak` backup is kept) |
+| `--force` | With `--import`, replace existing stats (a `.bak` backup is kept) |
 | `--help` | Show help |
 | `--version` | Show version |
 
-### Migrating from keybr.com
+**In-session keys:** `Esc` returns to the menu or quits, `Enter` selects a menu item or dismisses the lesson summary, the arrow keys navigate menus and settings, and `Left`/`Right` adjust setting values.
 
-If you've been practicing on [keybr.com](https://www.keybr.com), you can carry your
-full learning state over and continue in the terminal:
+## Bring your keybr.com history
 
-1. On keybr.com, open your profile page and click **Download data** — you'll get a
-   `typing-data.json` file with your complete practice history.
+Already practicing on [keybr.com](https://www.keybr.com)? Carry your progress over and continue in the terminal.
+
+1. On keybr.com, open your profile and click **Download data**. You get a `typing-data.json` file with your full practice history.
 2. Import it:
 
    ```bash
    keybr-tui --import typing-data.json
    ```
 
-The importer replays every session through the same per-key smoothing keybr.com
-uses, so your unlocked letters, per-key speeds, and focus letter come out exactly
-as the website computed them. Since your target speed setting is not part of the
-export, pass `--target-wpm <N>` alongside `--import` if you use a non-default
-target on keybr.com — the unlocked set is derived against it (with no flag, the
-target saved in your config is used, so adjusting Settings between two imports
-changes what counts as "learned"; re-import any time to re-derive).
+The importer replays every session through the same per-key smoothing keybr.com uses, so your unlocked letters, per-key speeds, and focus letter come out exactly as the website computed them.
 
-Sessions from non-English layouts are skipped (this TUI is English-only for now),
-and existing local stats are never overwritten unless you pass `--force`, which
-still writes a `stats.json.bak` backup first.
+A few details worth knowing:
 
-### Keyboard Shortcuts
-
-| Key | Action |
-|-----|--------|
-| `Esc` | Return to menu / quit |
-| `Enter` | Select menu item / dismiss lesson summary |
-| Arrow keys | Navigate menus and settings |
-| `Left`/`Right` | Adjust settings values |
-
-## How the Adaptive Algorithm Works
-
-keybr-tui uses a phonetic text generation algorithm ported from [keybr.com](https://github.com/aradzie/keybr.com):
-
-1. **Letter scheduling**: You start with a small set of letters (6). The scheduler tracks your per-key reaction time using exponential smoothing and computes a confidence score against your target speed.
-2. **Unlocking**: When all active letters reach sufficient confidence, a new letter is unlocked from a frequency-ordered list.
-3. **Focus key**: The weakest key among your active set becomes the "focus key" and appears more frequently in generated text.
-4. **Text generation**: A Markov chain trained on English phonetic patterns generates pronounceable pseudo-words using only your active letters, with bias toward the focus key.
-5. **Tracking**: Each keystroke's reaction time is recorded; at the end of each lesson, every key's mean latency feeds an exponential moving average — the same per-result smoothing keybr.com applies.
-
-## Project Structure
-
-```text
-keybr-tui/
-├── src/
-│   ├── main.rs           # Entry point
-│   ├── app.rs            # Central state (MVU)
-│   ├── update.rs         # State transitions
-│   ├── ui.rs             # Rendering (read-only state)
-│   ├── events.rs         # Input + tick event channel
-│   ├── tui.rs            # Terminal setup/teardown
-│   ├── metrics.rs        # Per-key statistics
-│   ├── config.rs         # Config file parsing
-│   ├── persistence.rs    # Stats save/load
-│   ├── engine/           # Adaptive text generation
-│   └── components/       # UI widgets
-├── docs/                 # User-facing docs (comparison, FAQ, troubleshooting)
-└── .github/workflows/    # CI and release
-```
-
-## Development
-
-Build:
-
-```bash
-cargo build
-```
-
-Run:
-
-```bash
-cargo run
-```
-
-Test:
-
-```bash
-cargo test
-```
-
-Format:
-
-```bash
-cargo fmt --all
-```
-
-Lint:
-
-```bash
-cargo clippy --all-targets -- -D warnings
-```
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contribution workflow.
+- Your target speed is not part of the export. If you use a non-default target on keybr.com, pass `--target-wpm <N>` alongside `--import`, since the unlocked set is derived against it. With no flag, the target saved in your config is used.
+- Sessions from non-English layouts are skipped, since this TUI is English-only for now.
+- Existing local stats are never overwritten unless you pass `--force`, which still writes a `stats.json.bak` backup first.
 
 ## Configuration
 
-Config file location (XDG on Linux):
-
-```text
-~/.config/keybr-tui/config.toml
-```
-
-Example config:
+keybr-tui runs with zero config. To change the defaults, edit `~/.config/keybr-tui/config.toml` (the XDG path on Linux):
 
 ```toml
 target_wpm = 35
@@ -200,22 +118,32 @@ error_mode = "forgive-mistakes"  # or "stop-on-error"
 fragment_length = 100
 ```
 
-Stats are saved separately in the data directory. Use `keybr-tui --data-dir` to find it.
+<details>
+<summary>All config options</summary>
 
-## Screenshots
+| Key | Default | Description |
+|---|---|---|
+| `target_wpm` | `35` | Target speed in words per minute; drives the confidence threshold |
+| `error_mode` | `"forgive-mistakes"` | `"forgive-mistakes"` advances past typos, `"stop-on-error"` blocks until you correct them |
+| `fragment_length` | `100` | Characters of practice text generated per lesson |
+| `natural_words` | `true` | Prefer real English words, falling back to the phonetic model when none fit your active letters |
+| `daily_goal_minutes` | `30` | Daily practice goal in minutes; `0` hides the daily-goal indicator |
+| `alphabet_size` | `0.0` | Fraction of the non-starter alphabet to force-unlock regardless of confidence (keybr's `alphabetSize`), clamped to the range 0.0 to 1.0 |
 
-A terminal recording (asciinema/vhs) is on the roadmap. For now, run `cargo install keybr-tui` and try it.
+</details>
+
+Stats are stored separately. Run `keybr-tui --data-dir` to find them.
 
 ## Documentation
 
-- [docs/comparison.md](docs/comparison.md) — how keybr-tui compares to alternatives
-- [docs/faq.md](docs/faq.md) — frequently asked questions
-- [docs/troubleshooting.md](docs/troubleshooting.md) — common issues and fixes
+- [docs/comparison.md](docs/comparison.md): how keybr-tui compares to other typing trainers
+- [docs/faq.md](docs/faq.md): frequently asked questions
+- [docs/troubleshooting.md](docs/troubleshooting.md): common issues and fixes
+- [CONTRIBUTING.md](CONTRIBUTING.md): building from source, project layout, and the contribution workflow
 
 ## Credits
 
-- Algorithm inspired by [keybr.com](https://www.keybr.com) by [aradzie](https://github.com/aradzie/keybr.com)
-- Built with [ratatui](https://ratatui.rs/) and [crossterm](https://github.com/crossterm-rs/crossterm)
+Algorithm inspired by [keybr.com](https://www.keybr.com) by [aradzie](https://github.com/aradzie/keybr.com). Built with [ratatui](https://ratatui.rs/) and [crossterm](https://github.com/crossterm-rs/crossterm).
 
 ## License
 

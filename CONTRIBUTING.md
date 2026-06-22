@@ -48,6 +48,26 @@ The project follows a Model-View-Update (MVU) pattern:
 - `src/persistence.rs` -- Saving/loading stats and config.
 - `src/events.rs` -- Terminal event channel (keyboard input, tick events).
 
+Project layout:
+
+```text
+keybr-tui/
+├── src/
+│   ├── main.rs           # Entry point
+│   ├── app.rs            # Central state (MVU)
+│   ├── update.rs         # State transitions
+│   ├── ui.rs             # Rendering (read-only state)
+│   ├── events.rs         # Input + tick event channel
+│   ├── tui.rs            # Terminal setup/teardown
+│   ├── metrics.rs        # Per-key statistics
+│   ├── config.rs         # Config file parsing
+│   ├── persistence.rs    # Stats save/load
+│   ├── engine/           # Adaptive text generation
+│   └── components/       # UI widgets
+├── docs/                 # User-facing docs (comparison, FAQ, troubleshooting)
+└── .github/workflows/    # CI and release
+```
+
 For detailed architecture documentation, see the `docs/` directory.
 
 ## Code Style
