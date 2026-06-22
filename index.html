@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>keybr-tui — adaptive terminal typing trainer in Rust (keybr.com in your terminal)</title>
+  <title>keybr-tui: adaptive terminal typing trainer in Rust (keybr.com in your terminal)</title>
   <meta name="description" content="keybr-tui is an adaptive TUI typing trainer written in Rust. It ports keybr.com's phonetic Markov algorithm to your terminal, runs fully offline, and can import your keybr.com data export. Touch-typing practice with per-key confidence tracking.">
   <meta name="keywords" content="keybr, keybr tui, typing trainer, terminal typing trainer, tui typing tutor, touch typing, rust, ratatui, cli typing, keybr alternative">
   <meta name="author" content="y0sif">
@@ -14,14 +14,14 @@
 
   <!-- Open Graph -->
   <meta property="og:type" content="website">
-  <meta property="og:title" content="keybr-tui — adaptive terminal typing trainer in Rust">
-  <meta property="og:description" content="keybr.com's adaptive typing algorithm, ported to your terminal. Offline, local-first, and able to import your keybr.com data. Practice touch typing where you already live — the command line.">
+  <meta property="og:title" content="keybr-tui: adaptive terminal typing trainer in Rust">
+  <meta property="og:description" content="keybr.com's adaptive typing algorithm, ported to your terminal. Offline, local-first, and able to import your keybr.com data. Practice touch typing where you already live, the command line.">
   <meta property="og:url" content="https://y0sif.github.io/keybr-tui/">
   <meta property="og:site_name" content="keybr-tui">
 
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary">
-  <meta name="twitter:title" content="keybr-tui — adaptive terminal typing trainer in Rust">
+  <meta name="twitter:title" content="keybr-tui: adaptive terminal typing trainer in Rust">
   <meta name="twitter:description" content="keybr.com's adaptive typing algorithm in your terminal. Offline, local-first, imports your keybr.com data export.">
 
   <!-- JSON-LD: SoftwareApplication -->
@@ -291,9 +291,9 @@
 |   <  __/ |_| | |_) | |
 |_|\_\___|\__, |_.__/|_|
           |___/</pre>
-    <div class="tagline">type. learn. master.</div>
+    <div class="tagline">practice the keys that slow you down</div>
     <h1>Adaptive typing trainer for your terminal<span class="blink">_</span></h1>
-    <p class="lead"><strong>keybr.com's adaptive algorithm, ported to the command line.</strong> keybr-tui generates practice text with phonetic Markov chains, tracks your per-key confidence, and unlocks letters as you improve — fully offline, no account, no browser. Already practice on keybr.com? Import your data and keep going in the terminal.</p>
+    <p class="lead"><strong>keybr.com's adaptive algorithm, ported to the command line.</strong> keybr-tui times every key you press, finds the ones slowing you down, and builds drills aimed straight at them. A faithful port of the keybr.com engine that runs fully offline, with optional import of your keybr.com history.</p>
     <div class="badges">
       <a href="https://crates.io/crates/keybr-tui"><img src="https://img.shields.io/crates/v/keybr-tui.svg" alt="crates.io version"></a>
       <a href="https://docs.rs/keybr-tui"><img src="https://img.shields.io/docsrs/keybr-tui" alt="docs.rs"></a>
@@ -306,7 +306,7 @@
 
     <!-- Install -->
     <div class="install">
-      <h2>Quick install — Linux &amp; macOS</h2>
+      <h2>Quick install (Linux &amp; macOS)</h2>
       <div class="install-cmd">
         <code>curl -sSf https://y0sif.github.io/keybr-tui/install.sh | sh</code>
         <button onclick="copyCmd(this)">Copy</button>
@@ -330,7 +330,7 @@
       <div class="features">
         <div class="feature">
           <h3>Adaptive text generation</h3>
-          <p>Phonetic Markov chains generate pronounceable pseudo-words from your active letters — a faithful port of the keybr.com algorithm, not a wordlist or random characters.</p>
+          <p>Phonetic Markov chains generate pronounceable pseudo-words from your active letters. A faithful port of the keybr.com algorithm, not a wordlist or random characters.</p>
         </div>
         <div class="feature">
           <h3>Per-key confidence</h3>
@@ -338,7 +338,7 @@
         </div>
         <div class="feature">
           <h3>Progressive unlocking</h3>
-          <p>Start with a handful of letters. New ones unlock from a frequency-ordered list only once your active set reaches confidence — you're never overwhelmed.</p>
+          <p>Start with a handful of letters. New ones unlock from a frequency-ordered list only once your active set reaches confidence, so you're never overwhelmed.</p>
         </div>
         <div class="feature">
           <h3>Import from keybr.com</h3>
@@ -350,7 +350,7 @@
         </div>
         <div class="feature">
           <h3>Minimalist terminal UI</h3>
-          <p>Built with ratatui and terminal-native ANSI colors. The interface gets out of your way during practice — just text, WPM, and accuracy.</p>
+          <p>Built with ratatui and terminal-native ANSI colors. The interface gets out of your way during practice. Just text, WPM, and accuracy.</p>
         </div>
       </div>
     </section>
@@ -363,7 +363,7 @@
         <div class="step"><div><strong>Unlocking.</strong> <p>When all active letters reach sufficient confidence, a new letter is unlocked from a frequency-ordered list.</p></div></div>
         <div class="step"><div><strong>Focus key.</strong> <p>The weakest key in your active set becomes the focus key and appears more often in generated text until it catches up.</p></div></div>
         <div class="step"><div><strong>Text generation.</strong> <p>A Markov chain trained on English phonetic patterns produces pronounceable pseudo-words using only your active letters, biased toward the focus key.</p></div></div>
-        <div class="step"><div><strong>Tracking.</strong> <p>At the end of each lesson, every key's mean latency updates its moving average — the same per-result smoothing keybr.com applies.</p></div></div>
+        <div class="step"><div><strong>Tracking.</strong> <p>At the end of each lesson, every key's mean latency updates its moving average, the same per-result smoothing keybr.com applies.</p></div></div>
       </div>
     </section>
 
@@ -397,7 +397,7 @@
       </div>
       <div class="faq-item">
         <h3>How is it different from keybr.com?</h3>
-        <p>It's a faithful port of the keybr.com adaptive algorithm to a terminal UI — same learning, but fully offline, with stats in plain local files and no account, browser, or network requirement.</p>
+        <p>It's a faithful port of the keybr.com adaptive algorithm to a terminal UI. Same learning, but fully offline, with stats in plain local files and no account, browser, or network requirement.</p>
       </div>
       <div class="faq-item">
         <h3>Can I import my keybr.com data?</h3>
@@ -405,11 +405,11 @@
       </div>
       <div class="faq-item">
         <h3>Does it work offline?</h3>
-        <p>Yes — keybr-tui never makes a network request. Text is generated locally and all metrics are written to local files.</p>
+        <p>Yes. keybr-tui never makes a network request. Text is generated locally and all metrics are written to local files.</p>
       </div>
       <div class="faq-item">
         <h3>Which terminals are supported?</h3>
-        <p>Any modern emulator with a 256-color or true-color ANSI palette and a monospace font: Alacritty, Kitty, WezTerm, foot, iTerm2, Windows Terminal, GNOME Terminal, and more — on Linux, macOS, and Windows.</p>
+        <p>Any modern emulator with a 256-color or true-color ANSI palette and a monospace font: Alacritty, Kitty, WezTerm, foot, iTerm2, Windows Terminal, GNOME Terminal, and more, on Linux, macOS, and Windows.</p>
       </div>
       <div class="faq-item">
         <h3>Is it free and open source?</h3>
