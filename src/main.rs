@@ -113,6 +113,7 @@ fn main() -> color_eyre::Result<()> {
     app.daily_goal_minutes = config.daily_goal_minutes;
     app.alphabet_size = config.alphabet_size;
     app.scheduler.alphabet_size = config.alphabet_size;
+    app.manual_focus = config.focus_letter;
     app.generator.set_natural_words(app.natural_words);
     let rx = setup_event_channel();
 

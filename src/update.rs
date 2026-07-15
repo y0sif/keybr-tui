@@ -245,6 +245,29 @@ fn handle_progress_key(app: &mut App, key: crossterm::event::KeyEvent) {
 
 // --- Settings screen ---
 
+/// Step the manual focus pin through `[Auto] + active_keys` (unlock
+/// order), wrapping at both ends. `forward` is the Right key. A stale
+/// pin (letter no longer in `active_keys`) counts as Auto, matching
+/// how `App::effective_focus` treats it.
+fn cycle_manual_focus(app: &mut App, forward: bool) {
+    let keys = &app.scheduler.active_keys;
+    let total = keys.len() + 1;
+    let current = app
+        .manual_focus
+        .and_then(|c| keys.iter().position(|&k| k == c))
+        .map_or(0, |i| i + 1);
+    let next = if forward {
+        (current + 1) % total
+    } else {
+        (current + total - 1) % total
+    };
+    app.manual_focus = if next == 0 {
+        None
+    } else {
+        Some(keys[next - 1])
+    };
+}
+
 fn handle_settings_key(app: &mut App, key: crossterm::event::KeyEvent) {
     use KeyCode::*;
 
@@ -287,6 +310,10 @@ fn handle_settings_key(app: &mut App, key: crossterm::event::KeyEvent) {
                     app.alphabet_size = ((app.alphabet_size - 0.05).max(0.0) * 100.0).round() / 100.0;
                     app.scheduler.alphabet_size = app.alphabet_size;
                 }
+                4 => {
+                    // Step focus letter backward (Auto wraps to last unlocked).
+                    cycle_manual_focus(app, false);
+                }
                 _ => {}
             }
             request_config_save(app);
@@ -313,6 +340,10 @@ fn handle_settings_key(app: &mut App, key: crossterm::event::KeyEvent) {
                     // Increase alphabet size (one forced letter per 0.05 step).
                     app.alphabet_size = ((app.alphabet_size + 0.05).min(1.0) * 100.0).round() / 100.0;
                     app.scheduler.alphabet_size = app.alphabet_size;
+                }
+                4 => {
+                    // Step focus letter forward (last unlocked wraps to Auto).
+                    cycle_manual_focus(app, true);
                 }
                 _ => {}
             }
@@ -631,6 +662,42 @@ mod tests {
             update(&mut app, AppEvent::Key(make_key(KeyCode::Left)));
         }
         assert_eq!(app.alphabet_size, 0.0);
+    }
+
+    #[test]
+    fn settings_focus_right_cycles_and_wraps_to_auto() {
+        let mut app = App::new();
+        app.screen = AppScreen::Settings;
+        app.settings_selection = 4;
+        assert_eq!(app.manual_focus, None);
+
+        // Auto -> first unlocked letter ('e' heads the unlock order).
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Right)));
+        assert_eq!(app.manual_focus, Some('e'));
+        assert!(app.pending_config_save, "pin change must request a save");
+
+        // Stepping through the remaining unlocked letters lands back on Auto.
+        let remaining = app.scheduler.active_keys.len();
+        for _ in 0..remaining {
+            update(&mut app, AppEvent::Key(make_key(KeyCode::Right)));
+        }
+        assert_eq!(app.manual_focus, None);
+    }
+
+    #[test]
+    fn settings_focus_left_from_auto_wraps_to_last_letter() {
+        let mut app = App::new();
+        app.screen = AppScreen::Settings;
+        app.settings_selection = 4;
+        assert_eq!(app.manual_focus, None);
+
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Left)));
+        assert_eq!(app.manual_focus, app.scheduler.active_keys.last().copied());
+        assert!(app.pending_config_save);
+
+        // And one step forward returns to Auto.
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Right)));
+        assert_eq!(app.manual_focus, None);
     }
 
     // --- Deferred persistence: update must only raise flags, never write ---

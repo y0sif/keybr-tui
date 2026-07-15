@@ -211,7 +211,7 @@ fn render_current_key_row(app: &App, frame: &mut Frame, area: Rect) {
 
     let mut spans: Vec<Span<'static>> = vec![label_span("Current:")];
 
-    let Some(focused) = app.scheduler.focused_key else {
+    let Some(focused) = app.effective_focus() else {
         // No focused key (every active key is "learned"). Say so
         // explicitly rather than leaving the row blank — that's a
         // milestone worth highlighting.
@@ -228,7 +228,12 @@ fn render_current_key_row(app: &App, frame: &mut Frame, area: Rect) {
         app.scheduler.active_keys.iter().copied().collect();
     let is_active = active_set.contains(&focused);
 
-    spans.extend(key_bar::key_tile_spans(focused, best_conf, is_active, true));
+    // The focus is a manual pin when it came from the pin itself (a
+    // stale pin already fell back to auto inside `effective_focus`).
+    let is_pinned = app.manual_focus == Some(focused);
+    spans.extend(key_bar::key_tile_spans(
+        focused, best_conf, is_active, true, is_pinned,
+    ));
     spans.push(Span::raw("   "));
 
     // "Last" pair: current smoothed wpm + current confidence as % of target.

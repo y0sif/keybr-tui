@@ -103,6 +103,10 @@ pub struct App {
     /// confidence (keybr's `alphabetSize`, in [0.0, 1.0]). Mirrored onto
     /// `scheduler.alphabet_size` so the next scheduler update applies it.
     pub alphabet_size: f64,
+    /// User-pinned focus letter (keybr's manual lesson focus). Overrides
+    /// the scheduler's auto pick at generation time only — scheduler
+    /// logic, stats recording, and unlock progression are untouched.
+    pub manual_focus: Option<char>,
 
     // --- Daily-goal tracker (persisted) ---
     /// Wall-clock seconds practiced today. Display as minutes; storing in
@@ -242,6 +246,7 @@ impl App {
             natural_words: true,
             daily_goal_minutes: 30,
             alphabet_size: 0.0,
+            manual_focus: None,
             today_seconds_practiced,
             today_date,
             menu_selection: 0,
@@ -267,6 +272,17 @@ impl App {
                 eprintln!("Warning: failed to save config: {e}");
             }
         }
+    }
+
+    /// The focus letter the generator should force into every word:
+    /// the manual pin when set and still unlocked, otherwise the
+    /// scheduler's auto pick. The unlock guard makes a stale pin (e.g.
+    /// a hand-edited config naming a locked letter) fall back to auto
+    /// silently instead of forcing an unpracticed key.
+    pub fn effective_focus(&self) -> Option<char> {
+        self.manual_focus
+            .filter(|c| self.scheduler.active_keys.contains(c))
+            .or(self.scheduler.focused_key)
     }
 
     /// Target WPM for display (WPM = CPM / 5).
@@ -394,7 +410,7 @@ impl App {
         // generator before regenerating, so config changes take effect
         // at the next lesson boundary.
         self.generator.set_natural_words(self.natural_words);
-        let filter = LetterFilter::new(&self.scheduler.active_keys, self.scheduler.focused_key);
+        let filter = LetterFilter::new(&self.scheduler.active_keys, self.effective_focus());
         self.generated_text = self
             .generator
             .generate_fragment(&filter, self.fragment_length);
@@ -465,6 +481,7 @@ impl App {
             natural_words: self.natural_words,
             daily_goal_minutes: self.daily_goal_minutes,
             alphabet_size: self.alphabet_size,
+            focus_letter: self.manual_focus,
         }
     }
 }
@@ -535,5 +552,56 @@ mod tests {
         let app = App::new();
         assert_eq!(app.target_wpm(), 35);
         assert!((app.target_cpm - 175.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn effective_focus_prefers_unlocked_pin() {
+        let mut app = App::new();
+        // 'r' is one of the six starter letters, unlocked from lesson one.
+        app.manual_focus = Some('r');
+        assert_eq!(app.effective_focus(), Some('r'));
+    }
+
+    #[test]
+    fn effective_focus_falls_back_when_pin_is_locked() {
+        let mut app = App::new();
+        // 'z' is locked on a fresh profile; the stale pin must yield to
+        // the scheduler's auto pick.
+        assert!(!app.scheduler.active_keys.contains(&'z'));
+        app.manual_focus = Some('z');
+        assert!(app.scheduler.focused_key.is_some());
+        assert_eq!(app.effective_focus(), app.scheduler.focused_key);
+    }
+
+    #[test]
+    fn effective_focus_is_auto_pick_when_unpinned() {
+        let app = App::new();
+        assert_eq!(app.manual_focus, None);
+        assert_eq!(app.effective_focus(), app.scheduler.focused_key);
+    }
+
+    #[test]
+    fn pinned_letter_appears_in_every_generated_word() {
+        let mut app = App::new();
+        app.manual_focus = Some('r');
+        app.start_next_lesson();
+        assert!(!app.generated_text.is_empty());
+        for word in app.generated_text.split_whitespace() {
+            assert!(
+                word.contains('r'),
+                "pinned 'r' missing from word '{}' in: {}",
+                word,
+                app.generated_text
+            );
+        }
+    }
+
+    #[test]
+    fn to_config_carries_manual_focus() {
+        let mut app = App::new();
+        app.manual_focus = Some('r');
+        assert_eq!(app.to_config().focus_letter, Some('r'));
+        app.manual_focus = None;
+        assert_eq!(app.to_config().focus_letter, None);
     }
 }

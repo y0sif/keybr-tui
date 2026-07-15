@@ -54,6 +54,7 @@ pub fn key_tile_spans(
     best_conf: f64,
     is_active: bool,
     is_focused: bool,
+    is_pinned: bool,
 ) -> Vec<Span<'static>> {
     let bg = color_for(best_conf, is_active);
     let letter = key.to_ascii_uppercase().to_string();
@@ -64,6 +65,11 @@ pub fn key_tile_spans(
         style = style
             .add_modifier(Modifier::BOLD)
             .add_modifier(Modifier::UNDERLINED);
+        // A manual pin inverts the tile on top of the focus styling so
+        // it reads differently from the scheduler's auto pick.
+        if is_pinned {
+            style = style.add_modifier(Modifier::REVERSED);
+        }
     }
 
     vec![
@@ -76,7 +82,10 @@ pub fn key_tile_spans(
 pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let active_set: std::collections::HashSet<char> =
         app.scheduler.active_keys.iter().copied().collect();
-    let focused = app.scheduler.focused_key;
+    let focused = app.effective_focus();
+    // The focus is a manual pin only when the pin itself is still valid
+    // (unlocked); a stale pin falls back to auto and renders as such.
+    let focus_is_pinned = focused.is_some() && focused == app.manual_focus;
 
     // Each key takes 3 cells (space + letter + space). Adjacent tiles
     // share no gap so the heatmap reads as one continuous colored band,
@@ -92,7 +101,13 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
             .unwrap_or(0.0);
         let is_focused = focused == Some(key);
 
-        spans.extend(key_tile_spans(key, best_conf, is_active, is_focused));
+        spans.extend(key_tile_spans(
+            key,
+            best_conf,
+            is_active,
+            is_focused,
+            is_focused && focus_is_pinned,
+        ));
     }
 
     // 26 letters × 3 cells = 78 chars; center when it fits, otherwise
@@ -140,7 +155,7 @@ mod tests {
 
     #[test]
     fn key_tile_spans_emits_three_cells_with_letter_centered() {
-        let spans = key_tile_spans('e', 1.0, true, false);
+        let spans = key_tile_spans('e', 1.0, true, false, false);
         assert_eq!(spans.len(), 3);
         assert_eq!(spans[0].content, " ");
         assert_eq!(spans[1].content, "E");
@@ -152,7 +167,7 @@ mod tests {
 
     #[test]
     fn locked_tile_uses_dark_gray_bg() {
-        let spans = key_tile_spans('z', 0.0, false, false);
+        let spans = key_tile_spans('z', 0.0, false, false, false);
         assert_eq!(spans[0].style.bg, Some(Color::DarkGray));
         assert_eq!(spans[1].style.bg, Some(Color::DarkGray));
         assert_eq!(spans[2].style.bg, Some(Color::DarkGray));
@@ -160,9 +175,22 @@ mod tests {
 
     #[test]
     fn focused_tile_is_bold_and_underlined() {
-        let spans = key_tile_spans('e', 1.0, true, true);
+        let spans = key_tile_spans('e', 1.0, true, true, false);
         let modifiers = spans[1].style.add_modifier;
         assert!(modifiers.contains(Modifier::BOLD));
         assert!(modifiers.contains(Modifier::UNDERLINED));
+        assert!(
+            !modifiers.contains(Modifier::REVERSED),
+            "auto focus must not render as a pin"
+        );
+    }
+
+    #[test]
+    fn pinned_tile_adds_reversed_over_focus_styling() {
+        let spans = key_tile_spans('e', 1.0, true, true, true);
+        let modifiers = spans[1].style.add_modifier;
+        assert!(modifiers.contains(Modifier::BOLD));
+        assert!(modifiers.contains(Modifier::UNDERLINED));
+        assert!(modifiers.contains(Modifier::REVERSED));
     }
 }

@@ -77,6 +77,13 @@ pub struct Config {
         deserialize_with = "de_alphabet_size"
     )]
     pub alphabet_size: f64,
+
+    /// User-pinned focus letter (keybr's manual lesson focus); `None`
+    /// means the scheduler picks automatically. The `skip_serializing_if`
+    /// is load-bearing: TOML cannot represent `None`, so serializing it
+    /// would make `Config::save()` error — the key is omitted instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focus_letter: Option<char>,
 }
 
 impl Default for Config {
@@ -88,6 +95,7 @@ impl Default for Config {
             natural_words: default_natural_words(),
             daily_goal_minutes: default_daily_goal_minutes(),
             alphabet_size: default_alphabet_size(),
+            focus_letter: None,
         }
     }
 }
@@ -163,6 +171,7 @@ mod tests {
             natural_words: false,
             daily_goal_minutes: 45,
             alphabet_size: 0.35,
+            focus_letter: Some('c'),
         };
         let serialized = toml::to_string_pretty(&cfg).unwrap();
         let deserialized: Config = toml::from_str(&serialized).unwrap();
@@ -172,6 +181,24 @@ mod tests {
         assert!(!deserialized.natural_words);
         assert_eq!(deserialized.daily_goal_minutes, 45);
         assert_eq!(deserialized.alphabet_size, 0.35);
+        assert_eq!(deserialized.focus_letter, Some('c'));
+    }
+
+    #[test]
+    fn config_focus_letter_none_roundtrip() {
+        // TOML has no `None`; serialization must omit the key rather than
+        // error, and the omitted key must load back as `None`.
+        let cfg = Config::default();
+        let serialized = toml::to_string_pretty(&cfg).unwrap();
+        assert!(!serialized.contains("focus_letter"));
+        let deserialized: Config = toml::from_str(&serialized).unwrap();
+        assert_eq!(deserialized.focus_letter, None);
+    }
+
+    #[test]
+    fn config_without_focus_letter_loads_as_none() {
+        let cfg: Config = toml::from_str("target_wpm = 40").unwrap();
+        assert_eq!(cfg.focus_letter, None);
     }
 
     #[test]
