@@ -230,7 +230,7 @@ fn render_current_key_row(app: &App, frame: &mut Frame, area: Rect) {
 
     // The focus is a manual pin when it came from the pin itself (a
     // stale pin already fell back to auto inside `effective_focus`).
-    let is_pinned = app.manual_focus == Some(focused);
+    let is_pinned = app.focus_is_pinned();
     spans.extend(key_bar::key_tile_spans(
         focused, best_conf, is_active, true, is_pinned,
     ));

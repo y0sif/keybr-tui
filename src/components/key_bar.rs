@@ -83,9 +83,9 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let active_set: std::collections::HashSet<char> =
         app.scheduler.active_keys.iter().copied().collect();
     let focused = app.effective_focus();
-    // The focus is a manual pin only when the pin itself is still valid
-    // (unlocked); a stale pin falls back to auto and renders as such.
-    let focus_is_pinned = focused.is_some() && focused == app.manual_focus;
+    // A stale pin falls back to auto inside `focus_is_pinned` and
+    // renders as such.
+    let focus_is_pinned = app.focus_is_pinned();
 
     // Each key takes 3 cells (space + letter + space). Adjacent tiles
     // share no gap so the heatmap reads as one continuous colored band,

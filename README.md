@@ -129,7 +129,7 @@ fragment_length = 100
 | `natural_words` | `true` | Prefer real English words, falling back to the phonetic model when none fit your active letters |
 | `daily_goal_minutes` | `30` | Daily practice goal in minutes; `0` hides the daily-goal indicator |
 | `alphabet_size` | `0.0` | Fraction of the non-starter alphabet to force-unlock regardless of confidence (keybr's `alphabetSize`), clamped to the range 0.0 to 1.0 |
-| `focus_letter` | unset | Pins one unlocked letter, given as a single lowercase letter, so every generated word contains it; omit the key (or cycle the Settings "Focus letter" row to Auto) for the automatic weakest-key focus |
+| `focus_letter` | `unset` | Pins one unlocked letter, given as a single letter (a-z), so every generated word contains it; omit the key (or cycle the Settings "Focus letter" row to Auto) for the automatic weakest-key focus |
 
 </details>
 

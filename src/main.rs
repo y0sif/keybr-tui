@@ -113,15 +113,14 @@ fn main() -> color_eyre::Result<()> {
     app.daily_goal_minutes = config.daily_goal_minutes;
     app.alphabet_size = config.alphabet_size;
     app.scheduler.alphabet_size = config.alphabet_size;
-    // Normalize the configured pin: a hand-edited config can hold an
-    // uppercase or not-yet-unlocked letter, and the Settings row label
-    // reads `manual_focus` directly, so a stale pin would display as
-    // pinned while behaving as Auto. Dropping it here keeps the label
-    // honest; `effective_focus` keeps its unlock guard as defense in depth.
-    app.manual_focus = config
-        .focus_letter
-        .map(|c| c.to_ascii_lowercase())
-        .filter(|c| app.scheduler.active_keys.contains(c));
+    // Re-run the scheduler now that the configured alphabet_size is in
+    // place: the constructor ran it with the default (0.0), so letters
+    // force-unlocked by alphabet_size are not yet in `active_keys`. This
+    // must happen BEFORE the pin normalization below, which drops any pin
+    // not in `active_keys` — otherwise a valid pin on a forced letter
+    // would be dropped and erased by the next config save.
+    app.scheduler.update(&app.per_key_stats, app.target_cpm);
+    app.set_manual_focus_from_config(config.focus_letter);
     app.generator.set_natural_words(app.natural_words);
     let rx = setup_event_channel();
 
