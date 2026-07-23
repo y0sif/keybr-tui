@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-07-23
+
+### Added
+
+- Manual letter focus (#7): a "Focus letter" row in Settings pins one unlocked letter
+  so every generated word contains it, overriding the automatic weakest-key focus.
+  Left/Right cycles Auto plus the currently unlocked letters. The pin persists in
+  `config.toml` as `focus_letter` (lowercased and validated against unlocked letters
+  at load, falling back to Auto if invalid), and the pinned key renders reversed in
+  the key heatmap to distinguish it from the automatic focus.
+
 ## [0.2.1] - 2026-06-22
 
 ### Changed
