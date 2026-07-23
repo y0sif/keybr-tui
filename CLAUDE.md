@@ -71,9 +71,13 @@ crates.io versions are immutable — never retag or republish a shipped version.
    disabled, same as whisrs, because they miss stacked PRs and read poorly.
 7. **Publish to crates.io**: always run `cargo publish` after the tag —
    do not skip this step.
-8. **Installer**: nothing to do — `install.sh` always serves the latest
+8. **Landing page (gh-pages)**: bump the hardcoded `"softwareVersion"` in
+   `index.html` (JSON-LD) and `<lastmod>` in `sitemap.xml` on the
+   `gh-pages` branch — use a temporary worktree and push. Never touch
+   `install.sh` there (auto-synced by `sync-installer.yml`).
+9. **Installer**: nothing to do — `install.sh` always serves the latest
    release and is auto-synced to gh-pages by `sync-installer.yml`.
-9. **AUR**: not yet published. `contrib/PKGBUILD` is the in-repo template;
+10. **AUR**: not yet published. `contrib/PKGBUILD` is the in-repo template;
    when an AUR package exists it will be maintained in an external checkout
    (like `~/Projects/whisrs-git`), bumping `pkgver`, regenerating `.SRCINFO`
    with `makepkg --printsrcinfo > .SRCINFO`, and pushing to AUR.
