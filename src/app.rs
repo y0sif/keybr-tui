@@ -103,6 +103,10 @@ pub struct App {
     /// confidence (keybr's `alphabetSize`, in [0.0, 1.0]). Mirrored onto
     /// `scheduler.alphabet_size` so the next scheduler update applies it.
     pub alphabet_size: f64,
+    /// User-pinned focus letter (keybr's manual lesson focus). Overrides
+    /// the scheduler's auto pick at generation time only — scheduler
+    /// logic, stats recording, and unlock progression are untouched.
+    pub manual_focus: Option<char>,
 
     // --- Daily-goal tracker (persisted) ---
     /// Wall-clock seconds practiced today. Display as minutes; storing in
@@ -242,6 +246,7 @@ impl App {
             natural_words: true,
             daily_goal_minutes: 30,
             alphabet_size: 0.0,
+            manual_focus: None,
             today_seconds_practiced,
             today_date,
             menu_selection: 0,
@@ -267,6 +272,46 @@ impl App {
                 eprintln!("Warning: failed to save config: {e}");
             }
         }
+    }
+
+    /// The focus letter the generator should force into every word:
+    /// the manual pin when set and still unlocked, otherwise the
+    /// scheduler's auto pick. The unlock guard makes a stale pin (e.g.
+    /// a hand-edited config naming a locked letter) fall back to auto
+    /// silently instead of forcing an unpracticed key.
+    pub fn effective_focus(&self) -> Option<char> {
+        self.manual_focus
+            .filter(|c| self.scheduler.active_keys.contains(c))
+            .or(self.scheduler.focused_key)
+    }
+
+    /// True when `effective_focus()` is the user's manual pin rather than
+    /// the scheduler's auto pick. A stale pin (letter no longer unlocked)
+    /// already fell back to auto inside `effective_focus`, so it reports
+    /// false here. Shared by every component that styles the pin
+    /// differently from the auto focus, so they can't drift apart.
+    pub fn focus_is_pinned(&self) -> bool {
+        self.manual_focus.is_some() && self.effective_focus() == self.manual_focus
+    }
+
+    /// Normalize and apply a `focus_letter` pin loaded from config.
+    ///
+    /// Lowercases first because the config is a plain TOML file: a
+    /// hand-edited `"R"` should pin 'r', not silently misbehave. Then
+    /// drops the pin unless the letter is currently unlocked: the
+    /// Settings row label reads `manual_focus` directly, so keeping a
+    /// locked letter here would display "pinned" while lessons behave as
+    /// Auto, and the next config save would persist that lie.
+    /// `effective_focus` keeps its own unlock guard as defense in depth
+    /// for pins set at runtime.
+    ///
+    /// Callers must run `scheduler.update` with the final `alphabet_size`
+    /// applied *before* calling this, so letters force-unlocked by that
+    /// setting count as valid pins.
+    pub fn set_manual_focus_from_config(&mut self, pin: Option<char>) {
+        self.manual_focus = pin
+            .map(|c| c.to_ascii_lowercase())
+            .filter(|c| self.scheduler.active_keys.contains(c));
     }
 
     /// Target WPM for display (WPM = CPM / 5).
@@ -394,7 +439,7 @@ impl App {
         // generator before regenerating, so config changes take effect
         // at the next lesson boundary.
         self.generator.set_natural_words(self.natural_words);
-        let filter = LetterFilter::new(&self.scheduler.active_keys, self.scheduler.focused_key);
+        let filter = LetterFilter::new(&self.scheduler.active_keys, self.effective_focus());
         self.generated_text = self
             .generator
             .generate_fragment(&filter, self.fragment_length);
@@ -465,6 +510,7 @@ impl App {
             natural_words: self.natural_words,
             daily_goal_minutes: self.daily_goal_minutes,
             alphabet_size: self.alphabet_size,
+            focus_letter: self.manual_focus,
         }
     }
 }
@@ -535,5 +581,105 @@ mod tests {
         let app = App::new();
         assert_eq!(app.target_wpm(), 35);
         assert!((app.target_cpm - 175.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn effective_focus_prefers_unlocked_pin() {
+        let mut app = App::new();
+        // 'r' is one of the six starter letters, unlocked from lesson one.
+        app.manual_focus = Some('r');
+        assert_eq!(app.effective_focus(), Some('r'));
+    }
+
+    #[test]
+    fn effective_focus_falls_back_when_pin_is_locked() {
+        let mut app = App::new();
+        // 'z' is locked on a fresh profile; the stale pin must yield to
+        // the scheduler's auto pick.
+        assert!(!app.scheduler.active_keys.contains(&'z'));
+        app.manual_focus = Some('z');
+        assert!(app.scheduler.focused_key.is_some());
+        assert_eq!(app.effective_focus(), app.scheduler.focused_key);
+    }
+
+    #[test]
+    fn effective_focus_is_auto_pick_when_unpinned() {
+        let app = App::new();
+        assert_eq!(app.manual_focus, None);
+        assert_eq!(app.effective_focus(), app.scheduler.focused_key);
+    }
+
+    #[test]
+    fn pinned_letter_appears_in_every_generated_word() {
+        let mut app = App::new();
+        app.manual_focus = Some('r');
+        app.start_next_lesson();
+        assert!(!app.generated_text.is_empty());
+        for word in app.generated_text.split_whitespace() {
+            assert!(
+                word.contains('r'),
+                "pinned 'r' missing from word '{}' in: {}",
+                word,
+                app.generated_text
+            );
+        }
+    }
+
+    #[test]
+    fn to_config_carries_manual_focus() {
+        let mut app = App::new();
+        app.manual_focus = Some('r');
+        assert_eq!(app.to_config().focus_letter, Some('r'));
+        app.manual_focus = None;
+        assert_eq!(app.to_config().focus_letter, None);
+    }
+
+    #[test]
+    fn config_pin_normalizes_uppercase_to_valid_pin() {
+        let mut app = App::new();
+        // A hand-edited config may hold "R"; 'r' is a starter letter, so
+        // the lowered pin is valid and must survive.
+        app.set_manual_focus_from_config(Some('R'));
+        assert_eq!(app.manual_focus, Some('r'));
+    }
+
+    #[test]
+    fn config_pin_on_locked_letter_is_dropped() {
+        let mut app = App::new();
+        // 'z' is locked on a fresh profile — the pin must be dropped so
+        // the Settings label doesn't claim a pin that behaves as Auto.
+        assert!(!app.scheduler.active_keys.contains(&'z'));
+        app.set_manual_focus_from_config(Some('z'));
+        assert_eq!(app.manual_focus, None);
+    }
+
+    #[test]
+    fn config_pin_on_forced_letter_survives_scheduler_rerun() {
+        let mut app = App::new();
+        // Mirror the real main.rs load order: mirror the configured
+        // alphabet_size onto the scheduler, re-run the scheduler so the
+        // force-unlocked letters join `active_keys`, THEN validate the
+        // pin. alphabet_size 0.05 forces one extra letter: 't'.
+        app.alphabet_size = 0.05;
+        app.scheduler.alphabet_size = app.alphabet_size;
+        app.scheduler.update(&app.per_key_stats, app.target_cpm);
+        assert!(app.scheduler.active_keys.contains(&'t'));
+
+        app.set_manual_focus_from_config(Some('t'));
+        assert_eq!(app.manual_focus, Some('t'));
+    }
+
+    #[test]
+    fn focus_is_pinned_tracks_pin_validity() {
+        let mut app = App::new();
+        // No pin: auto focus is never "pinned".
+        assert!(!app.focus_is_pinned());
+        // Valid pin on an unlocked starter letter.
+        app.manual_focus = Some('r');
+        assert!(app.focus_is_pinned());
+        // Stale pin on a locked letter falls back to auto and must not
+        // report as pinned.
+        app.manual_focus = Some('z');
+        assert!(!app.focus_is_pinned());
     }
 }

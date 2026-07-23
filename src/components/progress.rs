@@ -144,9 +144,10 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         Style::default().fg(Color::DarkGray),
     )));
 
+    let focused = app.effective_focus();
     for &key in UNLOCK_ORDER {
         let is_active = active_set.contains(&key);
-        let is_focused = app.scheduler.focused_key == Some(key);
+        let is_focused = focused == Some(key);
 
         let stats = app.per_key_stats.get(&key);
         let tier = tier_for(is_active, stats, app.target_cpm);
