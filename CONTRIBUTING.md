@@ -5,7 +5,7 @@ Thanks for your interest in contributing! This document covers the basics you ne
 ## Development Setup
 
 **Requirements:**
-- Rust stable toolchain (MSRV: 1.75)
+- Rust stable toolchain (MSRV: 1.88)
 - A terminal emulator with ANSI color support
 
 **Build and run:**

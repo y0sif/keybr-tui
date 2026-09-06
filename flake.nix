@@ -15,7 +15,7 @@
       let
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit system overlays; };
-        rustToolchain = pkgs.rust-bin.stable."1.75.0".default;
+        rustToolchain = pkgs.rust-bin.stable."1.88.0".default;
       in
       {
         devShells.default = pkgs.mkShell {

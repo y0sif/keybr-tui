@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- taria integration: the app binds a [taria](https://github.com/y0sif/taria)
+  socket and publishes a semantic tree for the menu, typing, progress, and
+  settings screens, so terminal agents can read and drive the app. Agent input
+  is routed through the existing key handler, so agents cannot reach states a
+  keyboard cannot, and a bind failure falls back to running taria-free.
+  `taria-ratatui` is a path dependency until taria ships on crates.io, which
+  intentionally makes this branch unpublishable (cargo publish, PKGBUILD, and
+  flake builds fail on this branch only).
+
+### Changed
+
+- Migrated from ratatui 0.29 to 0.30.2 (dropping the direct crossterm
+  dependency).
+- MSRV raised from 1.75 to 1.88.
+
 ## [0.2.2] - 2026-07-23
 
 ### Added
