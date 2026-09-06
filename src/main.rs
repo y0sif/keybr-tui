@@ -6,18 +6,20 @@ mod events;
 mod import;
 mod metrics;
 mod persistence;
+mod tree;
 mod tui;
 mod ui;
 mod update;
 
 use clap::Parser;
+use taria_ratatui::TariaLayer;
 
 use app::{App, ErrorMode};
 use config::{Config, ErrorModeSerde};
 use events::setup_event_channel;
 use persistence::SavedStats;
 use ui::view;
-use update::update;
+use update::{apply_agent_input, update};
 
 /// A terminal typing trainer inspired by keybr.com with adaptive learning.
 #[derive(Parser)]
@@ -105,6 +107,24 @@ fn main() -> color_eyre::Result<()> {
     // Load saved stats (unless --reset was used)
     let saved_stats = if cli.reset { None } else { SavedStats::load() };
 
+    // Bind the taria layer (agent accessibility) before entering the
+    // alternate screen, so the socket path is printed to the primary
+    // buffer. The app must never refuse to start because of the layer:
+    // on failure, log to stderr and run without it.
+    let mut layer = match TariaLayer::bind("keybr-tui") {
+        Ok(layer) => {
+            eprintln!(
+                "keybr-tui: taria socket at {}",
+                layer.socket_path().display()
+            );
+            Some(layer)
+        }
+        Err(err) => {
+            eprintln!("keybr-tui: taria layer disabled ({err}); continuing without it");
+            None
+        }
+    };
+
     let mut terminal = tui::init()?;
 
     let mut app = App::new_with_state(target_wpm, error_mode, saved_stats);
@@ -125,11 +145,37 @@ fn main() -> color_eyre::Result<()> {
     let rx = setup_event_channel();
 
     while app.running {
+        // Agent inputs are drained around the blocking recv below; the
+        // 50ms tick bounds the latency between an agent act and its
+        // effect. `apply_agent_input` is as pure as `update` — it only
+        // raises the same save flags, flushed at the bottom of the loop.
+        if let Some(layer) = layer.as_ref() {
+            while let Some(input) = layer.try_recv() {
+                apply_agent_input(&mut app, input);
+            }
+        }
+
         terminal.draw(|frame| view(&app, frame))?;
+
+        // Publish the semantic tree for the exact state just drawn; the
+        // layer dedups identical trees, so publishing every frame is free.
+        if let Some(layer) = layer.as_mut() {
+            let mut rec = layer.frame();
+            for node in tree::build_nodes(&app) {
+                rec.push(node);
+            }
+            rec.publish();
+        }
 
         match rx.recv() {
             Ok(event) => update(&mut app, event),
             Err(_) => break,
+        }
+
+        if let Some(layer) = layer.as_ref() {
+            while let Some(input) = layer.try_recv() {
+                apply_agent_input(&mut app, input);
+            }
         }
 
         // `update` never touches the disk — it only raises save flags.

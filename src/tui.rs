@@ -1,34 +1,17 @@
-use std::io::{self, stdout, Stdout};
-use std::panic;
-
-use crossterm::{
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::DefaultTerminal;
 
 /// Initialize the terminal: enable raw mode, enter alternate screen.
-pub fn init() -> color_eyre::Result<Terminal<CrosstermBackend<Stdout>>> {
-    install_panic_hook();
-    enable_raw_mode()?;
-    execute!(stdout(), EnterAlternateScreen)?;
-    let backend = CrosstermBackend::new(stdout());
-    let terminal = Terminal::new(backend)?;
-    Ok(terminal)
+///
+/// Delegates to ratatui's built-in init (new in 0.29/0.30), which also
+/// installs a panic hook that restores the terminal before delegating to
+/// the previous hook — the same behavior our hand-rolled hook provided,
+/// so color-eyre's panic report still prints on a sane screen.
+pub fn init() -> color_eyre::Result<DefaultTerminal> {
+    Ok(ratatui::try_init()?)
 }
 
 /// Restore the terminal to its original state.
 pub fn restore() -> color_eyre::Result<()> {
-    disable_raw_mode()?;
-    execute!(io::stdout(), LeaveAlternateScreen)?;
+    ratatui::try_restore()?;
     Ok(())
-}
-
-/// Install a panic hook that restores the terminal before printing the panic.
-fn install_panic_hook() {
-    let original_hook = panic::take_hook();
-    panic::set_hook(Box::new(move |info| {
-        let _ = restore();
-        original_hook(info);
-    }));
 }

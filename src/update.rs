@@ -1,12 +1,15 @@
 use std::time::Instant;
 
-use crossterm::event::{KeyCode, KeyModifiers};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use taria_ratatui::taria::{Action, AgentInput};
+use taria_ratatui::to_crossterm_key;
 
 use crate::app::{App, AppScreen, ErrorMode};
 use crate::components::menu::MENU_ITEMS;
 use crate::components::settings::SETTINGS_COUNT;
 use crate::events::AppEvent;
 use crate::persistence::today_date_string;
+use crate::tree::{menu_item_index, setting_index};
 
 /// Request a stats save. `update` never touches the disk itself — main's
 /// event loop performs the actual write after the event is processed.
@@ -42,7 +45,82 @@ pub fn update(app: &mut App, event: AppEvent) {
     }
 }
 
-fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
+/// Apply one agent input received through the taria layer.
+///
+/// Acts are macros over the existing key transitions, nothing more: a
+/// selection id resolves to the same index the arrow keys reach, then the
+/// act lowers into the exact [`KeyEvent`] a human would press, routed
+/// through the same `handle_key` path. An agent therefore cannot reach any
+/// state a keyboard user cannot. Pure like [`update`]: no I/O, only the
+/// deferred save flags.
+pub fn apply_agent_input(app: &mut App, input: AgentInput) {
+    match input {
+        AgentInput::Act { node, action, .. } => apply_act(app, node.0.as_str(), action),
+        AgentInput::Key { key } => {
+            if let Some(key) = to_crossterm_key(&key) {
+                handle_key(app, key);
+            }
+        }
+    }
+}
+
+/// A plain keypress, as synthesized for lowering acts into key handling.
+fn plain(code: KeyCode) -> KeyEvent {
+    KeyEvent::new(code, KeyModifiers::NONE)
+}
+
+fn apply_act(app: &mut App, node: &str, action: Action) {
+    // Only the current screen's advertised acts are honored; the published
+    // tree (see `crate::tree`) advertises none elsewhere, and behavior
+    // must agree with advertisement. The typing screen advertises no
+    // actions at all — typing goes through the raw-key fallback only.
+    match app.screen {
+        AppScreen::Menu => apply_menu_act(app, node, action),
+        AppScreen::Typing => {}
+        AppScreen::Progress => apply_progress_act(app, node, action),
+        AppScreen::Settings => apply_settings_act(app, node, action),
+    }
+}
+
+fn apply_menu_act(app: &mut App, node: &str, action: Action) {
+    let Some(index) = menu_item_index(node) else {
+        return;
+    };
+    match action {
+        Action::Select => app.menu_selection = index,
+        Action::Activate => {
+            app.menu_selection = index;
+            handle_key(app, plain(KeyCode::Enter));
+        }
+        _ => {}
+    }
+}
+
+fn apply_progress_act(app: &mut App, node: &str, action: Action) {
+    if node == "progress" && action == Action::Dismiss {
+        handle_key(app, plain(KeyCode::Esc));
+    }
+}
+
+fn apply_settings_act(app: &mut App, node: &str, action: Action) {
+    let Some(index) = setting_index(node) else {
+        return;
+    };
+    match action {
+        Action::Select => app.settings_selection = index,
+        Action::Custom(name) if name == "increase" => {
+            app.settings_selection = index;
+            handle_key(app, plain(KeyCode::Right));
+        }
+        Action::Custom(name) if name == "decrease" => {
+            app.settings_selection = index;
+            handle_key(app, plain(KeyCode::Left));
+        }
+        _ => {}
+    }
+}
+
+fn handle_key(app: &mut App, key: KeyEvent) {
     use KeyCode::*;
 
     // Global: Ctrl+C always quits
@@ -62,7 +140,7 @@ fn handle_key(app: &mut App, key: crossterm::event::KeyEvent) {
 
 // --- Menu screen ---
 
-fn handle_menu_key(app: &mut App, key: crossterm::event::KeyEvent) {
+fn handle_menu_key(app: &mut App, key: KeyEvent) {
     use KeyCode::*;
 
     match key.code {
@@ -108,7 +186,7 @@ fn handle_menu_key(app: &mut App, key: crossterm::event::KeyEvent) {
 
 // --- Typing screen ---
 
-fn handle_typing_key(app: &mut App, key: crossterm::event::KeyEvent) {
+fn handle_typing_key(app: &mut App, key: KeyEvent) {
     use KeyCode::*;
 
     match key.code {
@@ -237,7 +315,7 @@ fn handle_typed_char(app: &mut App, typed: char) {
 
 // --- Progress screen ---
 
-fn handle_progress_key(app: &mut App, key: crossterm::event::KeyEvent) {
+fn handle_progress_key(app: &mut App, key: KeyEvent) {
     if key.code == KeyCode::Esc {
         app.screen = AppScreen::Menu;
     }
@@ -268,7 +346,7 @@ fn cycle_manual_focus(app: &mut App, forward: bool) {
     };
 }
 
-fn handle_settings_key(app: &mut App, key: crossterm::event::KeyEvent) {
+fn handle_settings_key(app: &mut App, key: KeyEvent) {
     use KeyCode::*;
 
     match key.code {
@@ -365,7 +443,8 @@ fn handle_settings_key(app: &mut App, key: crossterm::event::KeyEvent) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+    use ratatui::crossterm::event::{KeyEventKind, KeyEventState};
+    use taria_ratatui::taria::NodeId;
 
     fn make_key(code: KeyCode) -> KeyEvent {
         KeyEvent {
@@ -374,6 +453,18 @@ mod tests {
             kind: KeyEventKind::Press,
             state: KeyEventState::NONE,
         }
+    }
+
+    fn act(node: &str, action: Action) -> AgentInput {
+        AgentInput::Act {
+            node: NodeId(node.into()),
+            action,
+            value: None,
+        }
+    }
+
+    fn agent_key(key: &str) -> AgentInput {
+        AgentInput::Key { key: key.into() }
     }
 
     fn make_test_app(text: &str) -> App {
@@ -742,5 +833,149 @@ mod tests {
         update(&mut app, AppEvent::Key(make_key(KeyCode::Esc)));
         assert_eq!(app.screen, AppScreen::Menu);
         assert!(app.pending_stats_save);
+    }
+
+    // --- Agent input via the taria layer ---
+
+    #[test]
+    fn agent_select_moves_menu_selection() {
+        let mut app = App::new();
+        assert_eq!(app.screen, AppScreen::Menu);
+        apply_agent_input(&mut app, act("menu-settings", Action::Select));
+        assert_eq!(app.menu_selection, 2);
+        assert_eq!(app.screen, AppScreen::Menu, "select alone must not open");
+    }
+
+    #[test]
+    fn agent_activate_opens_menu_item() {
+        let mut app = App::new();
+        apply_agent_input(&mut app, act("menu-view-progress", Action::Activate));
+        assert_eq!(app.screen, AppScreen::Progress);
+
+        let mut app = App::new();
+        apply_agent_input(&mut app, act("menu-start-practice", Action::Activate));
+        assert_eq!(app.screen, AppScreen::Typing);
+    }
+
+    #[test]
+    fn agent_activate_quit_raises_save_flag_like_a_human_quit() {
+        let mut app = App::new();
+        apply_agent_input(&mut app, act("menu-quit", Action::Activate));
+        assert!(!app.running);
+        assert!(app.pending_stats_save);
+    }
+
+    #[test]
+    fn agent_act_on_unknown_menu_node_is_ignored() {
+        let mut app = App::new();
+        apply_agent_input(&mut app, act("menu-nope", Action::Activate));
+        assert_eq!(app.screen, AppScreen::Menu);
+        assert_eq!(app.menu_selection, 0);
+        assert!(app.running);
+    }
+
+    #[test]
+    fn agent_settings_increase_and_decrease_adjust_value() {
+        let mut app = App::new();
+        app.screen = AppScreen::Settings;
+        let initial_wpm = app.target_wpm();
+
+        apply_agent_input(
+            &mut app,
+            act("setting-target-wpm", Action::Custom("increase".into())),
+        );
+        assert_eq!(app.target_wpm(), initial_wpm + 5);
+        assert!(app.pending_config_save, "adjustment must request a save");
+
+        apply_agent_input(
+            &mut app,
+            act("setting-target-wpm", Action::Custom("decrease".into())),
+        );
+        assert_eq!(app.target_wpm(), initial_wpm);
+    }
+
+    #[test]
+    fn agent_settings_select_moves_selection_only() {
+        let mut app = App::new();
+        app.screen = AppScreen::Settings;
+        apply_agent_input(&mut app, act("setting-focus-letter", Action::Select));
+        assert_eq!(app.settings_selection, 4);
+        assert_eq!(app.manual_focus, None, "select alone must not adjust");
+    }
+
+    #[test]
+    fn agent_settings_increase_targets_the_named_row() {
+        // The act names its row explicitly, regardless of the current
+        // selection — it lowers to select-then-Right.
+        let mut app = App::new();
+        app.screen = AppScreen::Settings;
+        app.settings_selection = 0;
+        apply_agent_input(
+            &mut app,
+            act("setting-fragment-length", Action::Custom("increase".into())),
+        );
+        assert_eq!(app.fragment_length, 110);
+        assert_eq!(app.settings_selection, 2);
+        assert_eq!(app.target_wpm(), 35, "other rows stay untouched");
+    }
+
+    #[test]
+    fn agent_progress_dismiss_returns_to_menu() {
+        let mut app = App::new();
+        app.screen = AppScreen::Progress;
+        apply_agent_input(&mut app, act("progress", Action::Dismiss));
+        assert_eq!(app.screen, AppScreen::Menu);
+    }
+
+    #[test]
+    fn typing_screen_refuses_all_acts() {
+        // The typing screen advertises no actions; acts against it (or any
+        // stale id from another screen) must be complete no-ops.
+        let mut app = make_test_app("abc");
+        for input in [
+            act("typing", Action::Activate),
+            act("typing", Action::Select),
+            act("typing", Action::SetValue),
+            act("menu-settings", Action::Activate),
+            act("setting-target-wpm", Action::Custom("increase".into())),
+            act("progress", Action::Dismiss),
+        ] {
+            apply_agent_input(&mut app, input);
+        }
+        assert_eq!(app.screen, AppScreen::Typing);
+        assert_eq!(app.cursor_pos, 0);
+        assert_eq!(app.target_wpm(), 35);
+        assert!(app.running);
+    }
+
+    #[test]
+    fn agent_key_fallback_types_exactly_like_a_human_keystroke() {
+        let mut app = make_test_app("abc");
+        apply_agent_input(&mut app, agent_key("a"));
+        assert_eq!(app.cursor_pos, 1);
+        assert!(app.first_attempt_correct.contains(&0));
+        assert!(!app.recovered_positions.contains(&0));
+
+        // A wrong key registers as an error, same as the human path.
+        apply_agent_input(&mut app, agent_key("x"));
+        assert_eq!(app.cursor_pos, 2, "forgive mode advances past the error");
+        assert!(app.error_positions.contains(&1));
+        assert!(app.ever_error_positions.contains(&1));
+    }
+
+    #[test]
+    fn agent_key_fallback_esc_leaves_typing_screen() {
+        let mut app = make_test_app("abc");
+        apply_agent_input(&mut app, agent_key("esc"));
+        assert_eq!(app.screen, AppScreen::Menu);
+        assert!(app.pending_stats_save);
+    }
+
+    #[test]
+    fn agent_unparseable_key_is_ignored() {
+        let mut app = make_test_app("abc");
+        apply_agent_input(&mut app, agent_key("not-a-key"));
+        assert_eq!(app.cursor_pos, 0);
+        assert_eq!(app.screen, AppScreen::Typing);
     }
 }

@@ -2,7 +2,7 @@
 name = "keybr-tui"
 version = "0.2.2"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.88"
 authors = ["y0sif <yosif@outbond.io>"]
 license = "MIT"
 description = "Adaptive terminal (TUI) typing trainer in Rust that ports the keybr.com algorithm, runs offline, and imports your keybr.com data"
@@ -18,8 +18,8 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-ratatui = "0.29"
-crossterm = "0.28"
+ratatui = "0.30.2"
+taria-ratatui = { path = "../../taria/crates/taria-ratatui" }
 color-eyre = "0.6"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
