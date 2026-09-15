@@ -19,10 +19,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 ratatui = "0.30.2"
-# Deliberate trade-off: this path dep makes the branch intentionally
-# unpublishable/unmergeable until taria ships on crates.io. cargo publish,
-# the PKGBUILD, and flake builds are expected to fail on this branch only.
-taria-ratatui = { path = "../../taria/crates/taria-ratatui" }
+taria-ratatui = "0.2"
 color-eyre = "0.6"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }

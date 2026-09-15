@@ -11,12 +11,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - taria integration: the app binds a [taria](https://github.com/y0sif/taria)
   socket and publishes a semantic tree for the menu, typing, progress, and
-  settings screens, so terminal agents can read and drive the app. Agent input
-  is routed through the existing key handler, so agents cannot reach states a
-  keyboard cannot, and a bind failure falls back to running taria-free.
-  `taria-ratatui` is a path dependency until taria ships on crates.io, which
-  intentionally makes this branch unpublishable (cargo publish, PKGBUILD, and
-  flake builds fail on this branch only).
+  settings screens, so terminal agents can read and drive the app. Semantic
+  acts and the raw-key fallback both lower into the existing key handler, so
+  agents cannot reach states a keyboard cannot, and a bind failure falls back
+  to running taria-free. Depends on the published `taria-ratatui` 0.2 crate.
+- Typed text (taria's `type_text`) is scored as keystrokes against the current
+  lesson instead of being lowered through the key handler. This app binds bare
+  letters as commands on every screen, so lowered text would have met them:
+  `type_text("quick")` on the menu would have quit the app at its first
+  character and reported success. Text sent while no lesson is running is
+  acknowledged `Ignored`, control characters in the payload are skipped rather
+  than lowered (a tab is the typing screen's error-mode toggle), and one call
+  types at most one lesson, because finishing one immediately generates the
+  next.
+- Agent input the app deliberately does nothing with is now acknowledged
+  `Ignored` — an act on the wrong screen, an unknown node id, an action a row
+  does not advertise, an unparseable key — so an agent waiting on an effect
+  stops waiting instead of timing out.
+- The typing screen publishes three dashboard rows that were previously
+  invisible to agents: the all-keys confidence heatmap (a `chart`, whose
+  meaning was carried entirely by colour), the daily-goal bar (a
+  `progress_bar`), and the "letter unlocked!" callout (a `status`, which
+  clears itself and so could vanish between two reads).
+- Agent traffic that went nowhere is reported on stderr after the terminal is
+  restored: dropped, stale and unreadable inputs, and answers the bridge was
+  too slow to read.
 
 ### Changed
 

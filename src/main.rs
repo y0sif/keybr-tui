@@ -12,14 +12,14 @@ mod ui;
 mod update;
 
 use clap::Parser;
-use taria_ratatui::TariaLayer;
+use taria_ratatui::{InputStatus, TariaLayer};
 
 use app::{App, ErrorMode};
 use config::{Config, ErrorModeSerde};
 use events::setup_event_channel;
 use persistence::SavedStats;
 use ui::view;
-use update::{apply_agent_input, update};
+use update::{apply_agent_input, update, Applied};
 
 /// A terminal typing trainer inspired by keybr.com with adaptive learning.
 #[derive(Parser)]
@@ -108,22 +108,21 @@ fn main() -> color_eyre::Result<()> {
     let saved_stats = if cli.reset { None } else { SavedStats::load() };
 
     // Bind the taria layer (agent accessibility) before entering the
-    // alternate screen, so the socket path is printed to the primary
-    // buffer. The app must never refuse to start because of the layer:
-    // on failure, log to stderr and run without it.
-    let mut layer = match TariaLayer::bind("keybr-tui") {
-        Ok(layer) => {
-            eprintln!(
-                "keybr-tui: taria socket at {}",
-                layer.socket_path().display()
-            );
-            Some(layer)
+    // alternate screen, so both of these lines land in the primary buffer.
+    // `bind_or_disabled` cannot fail: a layer that could not bind is inert
+    // and answers every method, so the loop below needs no branch on
+    // whether taria came up, and the app can never refuse to start because
+    // of it. The layer itself never prints — reporting is ours to place.
+    let mut layer = TariaLayer::bind_or_disabled("keybr-tui");
+    match layer.bind_error() {
+        None => eprintln!(
+            "keybr-tui: taria socket at {}",
+            layer.socket_path().display()
+        ),
+        Some(err) => {
+            eprintln!("keybr-tui: taria layer disabled ({err}); continuing without it")
         }
-        Err(err) => {
-            eprintln!("keybr-tui: taria layer disabled ({err}); continuing without it");
-            None
-        }
-    };
+    }
 
     let mut terminal = tui::init()?;
 
@@ -149,34 +148,20 @@ fn main() -> color_eyre::Result<()> {
         // 50ms tick bounds the latency between an agent act and its
         // effect. `apply_agent_input` is as pure as `update` — it only
         // raises the same save flags, flushed at the bottom of the loop.
-        if let Some(layer) = layer.as_ref() {
-            while let Some(input) = layer.try_recv() {
-                apply_agent_input(&mut app, input);
-            }
-        }
+        drain_agent_input(&mut app, &layer);
 
         terminal.draw(|frame| view(&app, frame))?;
 
         // Publish the semantic tree for the exact state just drawn; the
         // layer dedups identical trees, so publishing every frame is free.
-        if let Some(layer) = layer.as_mut() {
-            let mut rec = layer.frame();
-            for node in tree::build_nodes(&app) {
-                rec.push(node);
-            }
-            rec.publish();
-        }
+        layer.publish(tree::build_nodes(&app));
 
         match rx.recv() {
             Ok(event) => update(&mut app, event),
             Err(_) => break,
         }
 
-        if let Some(layer) = layer.as_ref() {
-            while let Some(input) = layer.try_recv() {
-                apply_agent_input(&mut app, input);
-            }
-        }
+        drain_agent_input(&mut app, &layer);
 
         // `update` never touches the disk — it only raises save flags.
         // Flushing here (including on the quit event, before the loop
@@ -186,5 +171,56 @@ fn main() -> color_eyre::Result<()> {
 
     tui::restore()?;
 
+    // Only now the alternate screen is gone is printing safe again. These
+    // four counters are agent traffic that went nowhere; the layer keeps
+    // them precisely because it must not print them itself.
+    report_taria_counters(&layer);
+
     Ok(())
+}
+
+/// Apply every queued agent input, refining the ack of each one the app
+/// deliberately ignored.
+///
+/// The layer acks `Delivered` as it hands an input over, which says only
+/// that this loop dequeued it. `Ignored` is the follow-up that tells an
+/// agent waiting on an effect that none is coming — an act on the wrong
+/// screen, an unknown node id, a key the grammar rejects, text sent while
+/// no lesson is running. Last ack wins.
+fn drain_agent_input(app: &mut App, layer: &TariaLayer) {
+    layer.drain_with_ids(|id, input| {
+        if apply_agent_input(app, input) == Applied::Ignored {
+            layer.ack(id, InputStatus::Ignored);
+        }
+    });
+}
+
+/// Report agent input that never reached the app (or whose answer never
+/// reached the agent). Call after the terminal is restored.
+fn report_taria_counters(layer: &TariaLayer) {
+    let dropped = layer.dropped_inputs();
+    if dropped > 0 {
+        eprintln!("keybr-tui: dropped {dropped} agent input(s): the app could not keep up");
+    }
+    let stale = layer.stale_inputs();
+    if stale > 0 {
+        eprintln!(
+            "keybr-tui: discarded {stale} agent input(s): the bridge connection they arrived \
+             on ended first"
+        );
+    }
+    let unknown = layer.unknown_inputs();
+    if unknown > 0 {
+        eprintln!(
+            "keybr-tui: could not read {unknown} agent input(s): the bridge speaks a newer \
+             taria than this build; raise the taria dependency"
+        );
+    }
+    let acks = layer.dropped_acks();
+    if acks > 0 {
+        eprintln!(
+            "keybr-tui: lost the answer to {acks} agent input(s): the bridge read them slower \
+             than the app answered, so those agent calls timed out instead"
+        );
+    }
 }

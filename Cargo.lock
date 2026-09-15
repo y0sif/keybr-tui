@@ -1609,15 +1609,18 @@ dependencies = [
 
 [[package]]
 name = "taria"
-version = "0.0.1"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a74d00d89c0a8add647a53c4d834b7fea094f5d563431cf3c287ee7c772b272f"
 dependencies = [
  "serde",
- "serde_json",
 ]
 
 [[package]]
 name = "taria-ratatui"
-version = "0.0.1"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e8e75d238e381c0d090b211e098414ee42aa5c50302789198ef33bafd8564e2"
 dependencies = [
  "ratatui",
  "serde_json",

@@ -45,6 +45,22 @@ pub fn update(app: &mut App, event: AppEvent) {
     }
 }
 
+/// What the app did with one agent input.
+///
+/// The taria layer acks every input `Delivered` as the event loop dequeues
+/// it, which only says it was dequeued. [`Ignored`](Applied::Ignored) is the
+/// follow-up main sends so an agent waiting on an effect stops waiting; see
+/// `main::drain_agent_input`. Before this existed every arm below simply
+/// returned, and an agent that acted on the wrong screen waited out a
+/// timeout to learn nothing had happened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Applied {
+    /// The input reached a handler that could act on it.
+    Handled,
+    /// The app looked at the input and deliberately did nothing.
+    Ignored,
+}
+
 /// Apply one agent input received through the taria layer.
 ///
 /// Acts are macros over the existing key transitions, nothing more: a
@@ -53,14 +69,89 @@ pub fn update(app: &mut App, event: AppEvent) {
 /// through the same `handle_key` path. An agent therefore cannot reach any
 /// state a keyboard user cannot. Pure like [`update`]: no I/O, only the
 /// deferred save flags.
-pub fn apply_agent_input(app: &mut App, input: AgentInput) {
+///
+/// # Typed text goes to the typing screen, never through `handle_key`
+///
+/// [`AgentInput::Text`] is typing, and in this app the surface that takes
+/// typing is the lesson: [`apply_text`] feeds it one scored keystroke at a
+/// time. It must not be lowered through [`handle_key`] the way
+/// [`AgentInput::Key`] is, because this app's screens bind bare letters as
+/// commands. `type_text("quick")` on the menu screen would meet the menu's
+/// `q` binding, save stats and exit the app before its second character; a
+/// tab inside a string would meet the typing screen's Tab binding and flip
+/// the error mode mid-lesson, silently rewriting the user's config file.
+/// Neither is something the agent asked for, and the tree changing (or the
+/// process ending) would have read as success.
+///
+/// [`AgentInput::Key`] keeps the raw lowering on purpose. A key is a
+/// keypress and is meant to reach the bindings wherever focus is; that is
+/// the whole difference between the two inputs.
+pub fn apply_agent_input(app: &mut App, input: AgentInput) -> Applied {
     match input {
         AgentInput::Act { node, action, .. } => apply_act(app, node.0.as_str(), action),
-        AgentInput::Key { key } => {
-            if let Some(key) = to_crossterm_key(&key) {
+        AgentInput::Key { key, .. } => match to_crossterm_key(&key) {
+            Some(key) => {
                 handle_key(app, key);
+                Applied::Handled
             }
+            // Either the shared grammar rejected the string or it named a key
+            // this adapter cannot lower. Nothing was pressed, so say so.
+            None => Applied::Ignored,
+        },
+        AgentInput::Text { text, .. } => apply_text(app, &text),
+        // An input kind taria grew after this build. It carries nothing this
+        // app could act on, so it is reported like every other input the app
+        // looked at and did nothing with.
+        _ => Applied::Ignored,
+    }
+}
+
+/// Type `text` into the lesson, one scored keystroke per character.
+///
+/// This is the typing tutor's answer to "where does the app put typing":
+/// there is no text field, so a character does not land in a buffer, it is
+/// scored against the target character under the cursor exactly as if a
+/// human had pressed that key. Wrong characters count as errors, and per-key
+/// reaction times are recorded, which is the point of the app.
+///
+/// Three rules follow from that, and none of them are the text-field rules:
+///
+/// * **Only on the typing screen.** Every other screen accepts no typing at
+///   all, so text sent there is [`Ignored`](Applied::Ignored) rather than
+///   fed to a key handler that reads letters as commands.
+/// * **Control characters are skipped, not lowered.** `taria_ratatui`'s
+///   [`text_to_keys`](taria_ratatui::text_to_keys) maps `'\n'` to Enter and
+///   `'\t'` to Tab, which is right for a text field and wrong here: Tab is
+///   this screen's error-mode toggle. A lesson holds letters and spaces, so
+///   a control character in the payload is a keystroke this surface does not
+///   score, and skipping it is what a human's Enter does mid-lesson.
+/// * **One call types at most one lesson.** Finishing a lesson immediately
+///   generates the next one ([`App::finish_lesson`]), so the characters
+///   after the last one would be scored against text the agent has never
+///   read. It stops at the boundary instead and the agent reads the new
+///   lesson before typing again.
+fn apply_text(app: &mut App, text: &str) -> Applied {
+    if app.screen != AppScreen::Typing {
+        return Applied::Ignored;
+    }
+    let lesson = app.lesson_count;
+    let mut typed = false;
+    for ch in text.chars() {
+        // `finish_lesson` bumps the count and swaps in text the agent has
+        // not seen; the screen guard is belt and braces.
+        if app.screen != AppScreen::Typing || app.lesson_count != lesson {
+            break;
         }
+        if ch.is_control() {
+            continue;
+        }
+        handle_typed_char(app, ch);
+        typed = true;
+    }
+    if typed {
+        Applied::Handled
+    } else {
+        Applied::Ignored
     }
 }
 
@@ -69,22 +160,22 @@ fn plain(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
 }
 
-fn apply_act(app: &mut App, node: &str, action: Action) {
+fn apply_act(app: &mut App, node: &str, action: Action) -> Applied {
     // Only the current screen's advertised acts are honored; the published
     // tree (see `crate::tree`) advertises none elsewhere, and behavior
     // must agree with advertisement. The typing screen advertises no
-    // actions at all — typing goes through the raw-key fallback only.
+    // actions at all — typing goes through `Text` and the raw-key fallback.
     match app.screen {
         AppScreen::Menu => apply_menu_act(app, node, action),
-        AppScreen::Typing => {}
+        AppScreen::Typing => Applied::Ignored,
         AppScreen::Progress => apply_progress_act(app, node, action),
         AppScreen::Settings => apply_settings_act(app, node, action),
     }
 }
 
-fn apply_menu_act(app: &mut App, node: &str, action: Action) {
+fn apply_menu_act(app: &mut App, node: &str, action: Action) -> Applied {
     let Some(index) = menu_item_index(node) else {
-        return;
+        return Applied::Ignored;
     };
     match action {
         Action::Select => app.menu_selection = index,
@@ -92,19 +183,22 @@ fn apply_menu_act(app: &mut App, node: &str, action: Action) {
             app.menu_selection = index;
             handle_key(app, plain(KeyCode::Enter));
         }
-        _ => {}
+        _ => return Applied::Ignored,
     }
+    Applied::Handled
 }
 
-fn apply_progress_act(app: &mut App, node: &str, action: Action) {
+fn apply_progress_act(app: &mut App, node: &str, action: Action) -> Applied {
     if node == "progress" && action == Action::Dismiss {
         handle_key(app, plain(KeyCode::Esc));
+        return Applied::Handled;
     }
+    Applied::Ignored
 }
 
-fn apply_settings_act(app: &mut App, node: &str, action: Action) {
+fn apply_settings_act(app: &mut App, node: &str, action: Action) -> Applied {
     let Some(index) = setting_index(node) else {
-        return;
+        return Applied::Ignored;
     };
     match action {
         Action::Select => app.settings_selection = index,
@@ -116,8 +210,9 @@ fn apply_settings_act(app: &mut App, node: &str, action: Action) {
             app.settings_selection = index;
             handle_key(app, plain(KeyCode::Left));
         }
-        _ => {}
+        _ => return Applied::Ignored,
     }
+    Applied::Handled
 }
 
 fn handle_key(app: &mut App, key: KeyEvent) {
@@ -456,15 +551,15 @@ mod tests {
     }
 
     fn act(node: &str, action: Action) -> AgentInput {
-        AgentInput::Act {
-            node: NodeId(node.into()),
-            action,
-            value: None,
-        }
+        AgentInput::act(NodeId(node.into()), action, None)
     }
 
     fn agent_key(key: &str) -> AgentInput {
-        AgentInput::Key { key: key.into() }
+        AgentInput::key(key)
+    }
+
+    fn agent_text(text: &str) -> AgentInput {
+        AgentInput::text(text)
     }
 
     fn make_test_app(text: &str) -> App {
@@ -868,10 +963,40 @@ mod tests {
     #[test]
     fn agent_act_on_unknown_menu_node_is_ignored() {
         let mut app = App::new();
-        apply_agent_input(&mut app, act("menu-nope", Action::Activate));
+        let applied = apply_agent_input(&mut app, act("menu-nope", Action::Activate));
         assert_eq!(app.screen, AppScreen::Menu);
         assert_eq!(app.menu_selection, 0);
         assert!(app.running);
+        // And the agent is told, rather than waiting out a timeout for an
+        // effect that was never going to come.
+        assert_eq!(applied, Applied::Ignored);
+    }
+
+    #[test]
+    fn agent_act_the_router_does_not_handle_is_ignored() {
+        // Every early return in the act router: an action a row does not
+        // advertise, an unknown settings row, the progress pane's non-act.
+        let mut app = App::new();
+        app.screen = AppScreen::Settings;
+        assert_eq!(
+            apply_agent_input(&mut app, act("setting-target-wpm", Action::Toggle)),
+            Applied::Ignored
+        );
+        assert_eq!(
+            apply_agent_input(&mut app, act("setting-nope", Action::Select)),
+            Applied::Ignored
+        );
+        app.screen = AppScreen::Progress;
+        assert_eq!(
+            apply_agent_input(&mut app, act("progress-key-e", Action::Activate)),
+            Applied::Ignored
+        );
+        app.screen = AppScreen::Menu;
+        assert_eq!(
+            apply_agent_input(&mut app, act("menu-quit", Action::Toggle)),
+            Applied::Ignored
+        );
+        assert!(app.running, "an ignored act must not quit");
     }
 
     #[test]
@@ -940,7 +1065,7 @@ mod tests {
             act("setting-target-wpm", Action::Custom("increase".into())),
             act("progress", Action::Dismiss),
         ] {
-            apply_agent_input(&mut app, input);
+            assert_eq!(apply_agent_input(&mut app, input), Applied::Ignored);
         }
         assert_eq!(app.screen, AppScreen::Typing);
         assert_eq!(app.cursor_pos, 0);
@@ -974,8 +1099,106 @@ mod tests {
     #[test]
     fn agent_unparseable_key_is_ignored() {
         let mut app = make_test_app("abc");
-        apply_agent_input(&mut app, agent_key("not-a-key"));
+        let applied = apply_agent_input(&mut app, agent_key("not-a-key"));
         assert_eq!(app.cursor_pos, 0);
         assert_eq!(app.screen, AppScreen::Typing);
+        assert_eq!(applied, Applied::Ignored);
+    }
+
+    // --- Typed text (`type_text`) ---
+
+    #[test]
+    fn agent_text_is_scored_one_keystroke_at_a_time() {
+        let mut app = make_test_app("abc");
+        assert_eq!(
+            apply_agent_input(&mut app, agent_text("ab")),
+            Applied::Handled
+        );
+        assert_eq!(app.cursor_pos, 2);
+        assert!(app.first_attempt_correct.contains(&0));
+        assert!(app.first_attempt_correct.contains(&1));
+
+        // A wrong character in the payload is an error, exactly as it is
+        // through the key path. This is the whole app: text is not stored,
+        // it is graded.
+        let mut app = make_test_app("abc");
+        assert_eq!(
+            apply_agent_input(&mut app, agent_text("ax")),
+            Applied::Handled
+        );
+        assert!(app.error_positions.contains(&1));
+        assert_eq!(app.lesson_errors, 1);
+    }
+
+    /// The regression this app exists to prove. Lowered through
+    /// `handle_key`, `type_text("quick")` would meet the menu's `q`
+    /// binding, raise the save flag and end the process at its first
+    /// character, and the bridge would have reported it a success.
+    #[test]
+    fn agent_text_on_the_menu_does_not_trip_the_quit_binding() {
+        let mut app = App::new();
+        assert_eq!(app.screen, AppScreen::Menu);
+        assert_eq!(
+            apply_agent_input(&mut app, agent_text("quick")),
+            Applied::Ignored
+        );
+        assert!(app.running, "typed text must never reach the q binding");
+        assert!(!app.pending_stats_save);
+        assert_eq!(app.screen, AppScreen::Menu);
+        assert_eq!(app.menu_selection, 0);
+    }
+
+    #[test]
+    fn agent_text_is_ignored_on_every_screen_that_takes_no_typing() {
+        for screen in [AppScreen::Menu, AppScreen::Progress, AppScreen::Settings] {
+            let mut app = App::new();
+            app.screen = screen;
+            assert_eq!(
+                apply_agent_input(&mut app, agent_text("hello")),
+                Applied::Ignored,
+                "screen {screen:?}"
+            );
+            assert_eq!(app.screen, screen, "screen {screen:?} must not move");
+        }
+    }
+
+    /// A tab inside typed text must not reach the typing screen's Tab
+    /// binding, which toggles the error mode and rewrites the config file.
+    #[test]
+    fn agent_text_skips_control_characters_instead_of_lowering_them() {
+        let mut app = make_test_app("abc");
+        let before = app.error_mode;
+        assert_eq!(
+            apply_agent_input(&mut app, agent_text("a\t\nb")),
+            Applied::Handled
+        );
+        assert_eq!(app.cursor_pos, 2, "only 'a' and 'b' are keystrokes here");
+        assert_eq!(app.error_mode, before, "a tab must not toggle the mode");
+        assert!(!app.pending_config_save);
+    }
+
+    /// Finishing a lesson immediately generates the next one, so the tail of
+    /// an over-long payload would be graded against text the agent has never
+    /// read. It stops at the boundary instead.
+    #[test]
+    fn agent_text_stops_at_the_lesson_boundary() {
+        let mut app = make_test_app("ab");
+        let applied = apply_agent_input(&mut app, agent_text("abcdefgh"));
+        assert_eq!(applied, Applied::Handled);
+        assert_eq!(app.lesson_count, 1, "the lesson finished");
+        assert_eq!(
+            app.cursor_pos, 0,
+            "the next lesson is untouched by the leftover characters"
+        );
+    }
+
+    #[test]
+    fn agent_empty_text_is_ignored() {
+        let mut app = make_test_app("abc");
+        assert_eq!(
+            apply_agent_input(&mut app, agent_text("")),
+            Applied::Ignored
+        );
+        assert_eq!(app.cursor_pos, 0);
     }
 }

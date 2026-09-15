@@ -8,6 +8,7 @@
 //! ([`menu_item_index`], [`setting_index`]) live here too, so the act
 //! router in [`crate::update`] can never drift from the published ids.
 
+use taria_ratatui::taria::id::IdSpace;
 use taria_ratatui::taria::{Action, Node, Role};
 
 use crate::app::{App, AppScreen, ErrorMode};
@@ -15,6 +16,18 @@ use crate::components::menu::MENU_ITEMS;
 use crate::components::progress::tier_for;
 use crate::components::settings::SETTINGS_COUNT;
 use crate::engine::scheduler::{forced_extra_letters, UNLOCK_ORDER};
+
+/// Id space for the main menu's rows: `menu-start-practice`, and so on.
+///
+/// One declaration for the spelling that `menu_item_id` writes and
+/// `menu_item_index` reads back, so the pair cannot drift. Slugs contain the
+/// separator themselves (`start-practice`); an id belongs to the space named
+/// before its *first* separator, so that is the key and nothing else claims
+/// it.
+const MENU: IdSpace = IdSpace::new("menu");
+
+/// Id space for the settings rows: `setting-target-wpm`, and so on.
+const SETTING: IdSpace = IdSpace::new("setting");
 
 /// Stable per-row slugs for the settings screen, index-aligned with the
 /// rows rendered by `components::settings` and matched on by
@@ -45,23 +58,23 @@ fn slug(label: &str) -> String {
 
 /// Node id for the menu item at `index` ("menu-start-practice", ...).
 pub fn menu_item_id(index: usize) -> String {
-    format!("menu-{}", slug(MENU_ITEMS[index]))
+    MENU.id(slug(MENU_ITEMS[index]))
 }
 
 /// Reverse lookup: which `MENU_ITEMS` index does this node id name?
 pub fn menu_item_index(node_id: &str) -> Option<usize> {
-    let rest = node_id.strip_prefix("menu-")?;
+    let rest = MENU.key(node_id)?;
     MENU_ITEMS.iter().position(|item| slug(item) == rest)
 }
 
 /// Node id for the settings row at `index` ("setting-target-wpm", ...).
 pub fn setting_id(index: usize) -> String {
-    format!("setting-{}", SETTING_SLUGS[index])
+    SETTING.id(SETTING_SLUGS[index])
 }
 
 /// Reverse lookup: which settings row does this node id name?
 pub fn setting_index(node_id: &str) -> Option<usize> {
-    let rest = node_id.strip_prefix("setting-")?;
+    let rest = SETTING.key(node_id)?;
     SETTING_SLUGS.iter().position(|s| *s == rest)
 }
 
@@ -69,8 +82,8 @@ pub fn setting_index(node_id: &str) -> Option<usize> {
 ///
 /// Invariant: exactly one node in the returned forest is focused, and only
 /// nodes whose actions the act router honors advertise any — the typing
-/// screen advertises none at all (typing goes through the raw-key
-/// fallback, exactly like a human keystroke).
+/// screen advertises none at all (typing arrives as `type_text` or raw
+/// keys, and is scored exactly like a human keystroke).
 pub fn build_nodes(app: &App) -> Vec<Node> {
     match app.screen {
         AppScreen::Menu => menu_nodes(app),
@@ -95,7 +108,7 @@ fn menu_nodes(app: &App) -> Vec<Node> {
 
 fn typing_nodes(app: &App) -> Vec<Node> {
     let total = app.generated_text.chars().count();
-    vec![
+    let mut nodes = vec![
         Node::new("target-text", Role::Text)
             .label("Target text")
             .value(app.generated_text.clone()),
@@ -114,13 +127,78 @@ fn typing_nodes(app: &App) -> Vec<Node> {
         Node::new("stat-accuracy", Role::Text)
             .label("Accuracy")
             .value(format!("{:.0}%", app.lesson_accuracy())),
-        // Deliberately actionless: an agent takes the typing test the way
-        // a human does, one raw key at a time. Esc/Tab shortcuts are raw
-        // keys too.
+        // The dashboard's 26-tile heatmap. Its whole meaning is carried by
+        // background colors an agent cannot see, which is what `Chart` is
+        // for: publish the confidences the colors were made from.
+        Node::new("key-heatmap", Role::Chart)
+            .label("All keys — confidence per unlocked letter")
+            .value(heatmap_value(app)),
+    ];
+    // Both dashboard rows below are conditional on screen, so they are
+    // conditional here: a node published while its row is blank would tell
+    // an agent about something the user cannot see.
+    if app.daily_goal_minutes > 0 {
+        let goal_secs = app.daily_goal_minutes.saturating_mul(60);
+        let pct = if goal_secs == 0 {
+            0.0
+        } else {
+            (app.today_seconds_practiced as f64 / goal_secs as f64).clamp(0.0, 1.0) * 100.0
+        };
+        nodes.push(
+            Node::new("daily-goal", Role::ProgressBar)
+                .label("Daily goal")
+                .value(format!(
+                    "{pct:.0}% of {} min ({} min practiced today)",
+                    app.daily_goal_minutes,
+                    app.today_seconds_practiced / 60
+                )),
+        );
+    }
+    // The "+ 'b' unlocked!" callout: on screen for one lesson and then gone
+    // by itself. `Status` exists for exactly this — unpublished, an unlock
+    // that happens between two `read_tree` calls is invisible, and the agent
+    // reads the app as having done nothing.
+    if let Some(ch) = app.last_lesson.as_ref().and_then(|r| r.newly_unlocked) {
+        nodes.push(
+            Node::new("unlock-notice", Role::Status)
+                .label("Letter unlocked")
+                .value(format!("+ '{ch}' unlocked!")),
+        );
+    }
+    // Deliberately actionless: an agent takes the typing test the way a
+    // human does. Typed text arrives as `type_text` and is scored one
+    // keystroke at a time (see `update::apply_text`); Esc/Tab are raw keys.
+    nodes.push(
         Node::new("typing", Role::TextInput)
-            .label("Typing area — send raw keys to type; Esc for menu")
+            .label("Typing area — type_text is scored one keystroke at a time; Esc for menu")
             .focused(true),
-    ]
+    );
+    nodes
+}
+
+/// The numbers behind the heatmap's colors: every unlocked letter with its
+/// best confidence against the current target speed, plus how many letters
+/// are still locked.
+fn heatmap_value(app: &App) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    for &key in UNLOCK_ORDER.iter() {
+        if !app.scheduler.active_keys.contains(&key) {
+            continue;
+        }
+        let conf = app
+            .per_key_stats
+            .get(&key)
+            .map(|s| s.best_confidence(app.target_cpm))
+            .unwrap_or(0.0);
+        parts.push(format!("{key} {:.0}%", conf * 100.0));
+    }
+    let locked = UNLOCK_ORDER
+        .len()
+        .saturating_sub(app.scheduler.active_keys.len());
+    if parts.is_empty() {
+        return format!("no letters unlocked, {locked} locked");
+    }
+    format!("{}; {locked} locked", parts.join(", "))
 }
 
 fn progress_nodes(app: &App) -> Vec<Node> {
@@ -301,6 +379,43 @@ mod tests {
         );
         assert!(find(&nodes, "stat-wpm").unwrap().value.is_some());
         assert!(find(&nodes, "stat-accuracy").unwrap().value.is_some());
+    }
+
+    /// The three dashboard rows an agent could not see before: the heatmap
+    /// (colour only), the daily-goal bar, and the unlock callout, which is
+    /// on screen for one lesson and then gone by itself.
+    #[test]
+    fn typing_screen_publishes_the_dashboard_rows() {
+        let mut app = App::new();
+        app.screen = AppScreen::Typing;
+
+        let nodes = build_nodes(&app);
+        let heatmap = find(&nodes, "key-heatmap").expect("heatmap node");
+        assert_eq!(heatmap.role, Role::Chart);
+        let value = heatmap.value.as_deref().unwrap();
+        assert!(value.contains("e "), "unlocked letters carry a confidence");
+        assert!(value.contains("locked"));
+
+        // The bar is published only while the user can see it.
+        assert_eq!(
+            find(&nodes, "daily-goal").unwrap().role,
+            Role::ProgressBar,
+            "the default config has a goal"
+        );
+        app.daily_goal_minutes = 0;
+        assert!(find(&build_nodes(&app), "daily-goal").is_none());
+
+        // And the callout only while it is on screen.
+        assert!(find(&nodes, "unlock-notice").is_none());
+        app.last_lesson = Some(crate::app::LessonResult {
+            wpm: 40.0,
+            accuracy: 95.0,
+            newly_unlocked: Some('b'),
+        });
+        let with_notice = build_nodes(&app);
+        let notice = find(&with_notice, "unlock-notice").expect("unlock notice");
+        assert_eq!(notice.role, Role::Status);
+        assert_eq!(notice.value.as_deref(), Some("+ 'b' unlocked!"));
     }
 
     #[test]
