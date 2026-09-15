@@ -7,6 +7,10 @@
 //! exactly one node is focused on every screen. The reverse id lookups
 //! ([`menu_item_index`], [`setting_index`]) live here too, so the act
 //! router in [`crate::update`] can never drift from the published ids.
+//!
+//! The whole module is unix-only: taria's transport is a unix domain
+//! socket, so `taria-ratatui` is a `cfg(unix)` dependency and `mod tree`
+//! is declared under the same gate in `main.rs`.
 
 use taria_ratatui::taria::id::IdSpace;
 use taria_ratatui::taria::{Action, Node, Role};

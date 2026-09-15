@@ -36,6 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Agent traffic that went nowhere is reported on stderr after the terminal is
   restored: dropped, stale and unreadable inputs, and answers the bridge was
   too slow to read.
+- The taria integration is unix-only: Linux and macOS. taria's transport is a
+  unix domain socket (`std::os::unix::net`), so `taria-ratatui` does not
+  compile for Windows at all. It is declared under
+  `[target.'cfg(unix)'.dependencies]` and every touch point in the app is
+  gated `#[cfg(unix)]`, including the semantic tree module. Windows builds are
+  taria-free: same screens, same keys, same files, with no agent surface. The
+  ratatui 0.30.2 migration below still applies to them.
 
 ### Changed
 

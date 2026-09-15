@@ -19,7 +19,6 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 ratatui = "0.30.2"
-taria-ratatui = "0.2"
 color-eyre = "0.6"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
@@ -32,8 +31,14 @@ directories = "6"
 # declares its own libc as optional and unix-gated, so it is not something
 # crossterm hands us on Windows — gate ours the same way rather than making
 # every target depend on libc directly.
+#
+# taria-ratatui is unix-only for a harder reason: its transport is a unix
+# domain socket (`std::os::unix::net`), so the crate does not compile for
+# Windows at all. The whole taria integration is therefore `#[cfg(unix)]`
+# in this crate, and the Windows build is taria-free.
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+taria-ratatui = "0.2"
 
 [profile.release]
 lto = true

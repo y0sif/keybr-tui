@@ -23,8 +23,8 @@ const NO_SAMPLE: &str = "—";
 
 /// Progress tier derived from confidence vs. target CPM.
 /// `Locked` keys haven't been unlocked by the scheduler yet.
-/// `pub(crate)` so the taria tree (`crate::tree`) reports the same tiers
-/// the human sees, from the same thresholds.
+/// `pub(crate)` so the taria tree (`crate::tree`, unix only) reports the
+/// same tiers the human sees, from the same thresholds.
 pub(crate) enum Tier {
     Locked,
     Early,

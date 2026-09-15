@@ -6,12 +6,18 @@ mod events;
 mod import;
 mod metrics;
 mod persistence;
+// The whole taria integration is unix-only: taria's transport is a unix
+// domain socket, so `taria-ratatui` does not compile for Windows. Every
+// touch point below is gated the same way, and the Windows build runs
+// exactly as it did before taria existed.
+#[cfg(unix)]
 mod tree;
 mod tui;
 mod ui;
 mod update;
 
 use clap::Parser;
+#[cfg(unix)]
 use taria_ratatui::{InputStatus, TariaLayer};
 
 use app::{App, ErrorMode};
@@ -19,7 +25,9 @@ use config::{Config, ErrorModeSerde};
 use events::setup_event_channel;
 use persistence::SavedStats;
 use ui::view;
-use update::{apply_agent_input, update, Applied};
+use update::update;
+#[cfg(unix)]
+use update::{apply_agent_input, Applied};
 
 /// A terminal typing trainer inspired by keybr.com with adaptive learning.
 #[derive(Parser)]
@@ -108,21 +116,10 @@ fn main() -> color_eyre::Result<()> {
     let saved_stats = if cli.reset { None } else { SavedStats::load() };
 
     // Bind the taria layer (agent accessibility) before entering the
-    // alternate screen, so both of these lines land in the primary buffer.
-    // `bind_or_disabled` cannot fail: a layer that could not bind is inert
-    // and answers every method, so the loop below needs no branch on
-    // whether taria came up, and the app can never refuse to start because
-    // of it. The layer itself never prints — reporting is ours to place.
-    let mut layer = TariaLayer::bind_or_disabled("keybr-tui");
-    match layer.bind_error() {
-        None => eprintln!(
-            "keybr-tui: taria socket at {}",
-            layer.socket_path().display()
-        ),
-        Some(err) => {
-            eprintln!("keybr-tui: taria layer disabled ({err}); continuing without it")
-        }
-    }
+    // alternate screen, so its report lands in the primary buffer. Unix
+    // only: see `bind_taria_layer`.
+    #[cfg(unix)]
+    let mut layer = bind_taria_layer();
 
     let mut terminal = tui::init()?;
 
@@ -148,12 +145,14 @@ fn main() -> color_eyre::Result<()> {
         // 50ms tick bounds the latency between an agent act and its
         // effect. `apply_agent_input` is as pure as `update` — it only
         // raises the same save flags, flushed at the bottom of the loop.
+        #[cfg(unix)]
         drain_agent_input(&mut app, &layer);
 
         terminal.draw(|frame| view(&app, frame))?;
 
         // Publish the semantic tree for the exact state just drawn; the
         // layer dedups identical trees, so publishing every frame is free.
+        #[cfg(unix)]
         layer.publish(tree::build_nodes(&app));
 
         match rx.recv() {
@@ -161,6 +160,7 @@ fn main() -> color_eyre::Result<()> {
             Err(_) => break,
         }
 
+        #[cfg(unix)]
         drain_agent_input(&mut app, &layer);
 
         // `update` never touches the disk — it only raises save flags.
@@ -174,9 +174,33 @@ fn main() -> color_eyre::Result<()> {
     // Only now the alternate screen is gone is printing safe again. These
     // four counters are agent traffic that went nowhere; the layer keeps
     // them precisely because it must not print them itself.
+    #[cfg(unix)]
     report_taria_counters(&layer);
 
     Ok(())
+}
+
+/// Bind the taria layer (agent accessibility). Called before entering the
+/// alternate screen, so whichever line it prints lands in the primary
+/// buffer.
+///
+/// `bind_or_disabled` cannot fail: a layer that could not bind is inert and
+/// answers every method, so the loop in `main` needs no branch on whether
+/// taria came up, and the app can never refuse to start because of it. The
+/// layer itself never prints — reporting is ours to place.
+#[cfg(unix)]
+fn bind_taria_layer() -> TariaLayer {
+    let layer = TariaLayer::bind_or_disabled("keybr-tui");
+    match layer.bind_error() {
+        None => eprintln!(
+            "keybr-tui: taria socket at {}",
+            layer.socket_path().display()
+        ),
+        Some(err) => {
+            eprintln!("keybr-tui: taria layer disabled ({err}); continuing without it")
+        }
+    }
+    layer
 }
 
 /// Apply every queued agent input, refining the ack of each one the app
@@ -187,6 +211,7 @@ fn main() -> color_eyre::Result<()> {
 /// agent waiting on an effect that none is coming — an act on the wrong
 /// screen, an unknown node id, a key the grammar rejects, text sent while
 /// no lesson is running. Last ack wins.
+#[cfg(unix)]
 fn drain_agent_input(app: &mut App, layer: &TariaLayer) {
     layer.drain_with_ids(|id, input| {
         if apply_agent_input(app, input) == Applied::Ignored {
@@ -197,6 +222,7 @@ fn drain_agent_input(app: &mut App, layer: &TariaLayer) {
 
 /// Report agent input that never reached the app (or whose answer never
 /// reached the agent). Call after the terminal is restored.
+#[cfg(unix)]
 fn report_taria_counters(layer: &TariaLayer) {
     let dropped = layer.dropped_inputs();
     if dropped > 0 {
