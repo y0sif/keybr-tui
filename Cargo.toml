@@ -2,7 +2,7 @@
 name = "keybr-tui"
 version = "0.2.2"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.88"
 authors = ["y0sif <yosif@outbond.io>"]
 license = "MIT"
 description = "Adaptive terminal (TUI) typing trainer in Rust that ports the keybr.com algorithm, runs offline, and imports your keybr.com data"
@@ -18,8 +18,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-ratatui = "0.29"
-crossterm = "0.28"
+ratatui = "0.30.2"
 color-eyre = "0.6"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
@@ -32,8 +31,14 @@ directories = "6"
 # declares its own libc as optional and unix-gated, so it is not something
 # crossterm hands us on Windows — gate ours the same way rather than making
 # every target depend on libc directly.
+#
+# taria-ratatui is unix-only for a harder reason: its transport is a unix
+# domain socket (`std::os::unix::net`), so the crate does not compile for
+# Windows at all. The whole taria integration is therefore `#[cfg(unix)]`
+# in this crate, and the Windows build is taria-free.
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+taria-ratatui = "0.2"
 
 [profile.release]
 lto = true

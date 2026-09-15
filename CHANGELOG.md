@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- taria integration: the app binds a [taria](https://github.com/y0sif/taria)
+  socket and publishes a semantic tree for the menu, typing, progress, and
+  settings screens, so terminal agents can read and drive the app. Semantic
+  acts and the raw-key fallback both lower into the existing key handler, so
+  agents cannot reach states a keyboard cannot, and a bind failure falls back
+  to running taria-free. Depends on the published `taria-ratatui` 0.2 crate.
+- Typed text (taria's `type_text`) is scored as keystrokes against the current
+  lesson instead of being lowered through the key handler. This app binds bare
+  letters as commands on every screen, so lowered text would have met them:
+  `type_text("quick")` on the menu would have quit the app at its first
+  character and reported success. Text sent while no lesson is running is
+  acknowledged `Ignored`, control characters in the payload are skipped rather
+  than lowered (a tab is the typing screen's error-mode toggle), and one call
+  types at most one lesson, because finishing one immediately generates the
+  next.
+- Agent input the app deliberately does nothing with is now acknowledged
+  `Ignored` — an act on the wrong screen, an unknown node id, an action a row
+  does not advertise, an unparseable key — so an agent waiting on an effect
+  stops waiting instead of timing out.
+- The typing screen publishes three dashboard rows that were previously
+  invisible to agents: the all-keys confidence heatmap (a `chart`, whose
+  meaning was carried entirely by colour), the daily-goal bar (a
+  `progress_bar`), and the "letter unlocked!" callout (a `status`, which
+  clears itself and so could vanish between two reads).
+- Agent traffic that went nowhere is reported on stderr after the terminal is
+  restored: dropped, stale and unreadable inputs, and answers the bridge was
+  too slow to read.
+- The taria integration is unix-only: Linux and macOS. taria's transport is a
+  unix domain socket (`std::os::unix::net`), so `taria-ratatui` does not
+  compile for Windows at all. It is declared under
+  `[target.'cfg(unix)'.dependencies]` and every touch point in the app is
+  gated `#[cfg(unix)]`, including the semantic tree module. Windows builds are
+  taria-free: same screens, same keys, same files, with no agent surface. The
+  ratatui 0.30.2 migration below still applies to them.
+
+### Changed
+
+- Migrated from ratatui 0.29 to 0.30.2 (dropping the direct crossterm
+  dependency).
+- MSRV raised from 1.75 to 1.88.
 ### Fixed
 
 - Daily goal now rolls over at local midnight instead of UTC midnight. Previously an

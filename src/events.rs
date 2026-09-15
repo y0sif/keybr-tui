@@ -2,10 +2,10 @@ use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyEventKind};
+use ratatui::crossterm::event::{self, Event, KeyEvent, KeyEventKind};
 
 pub enum AppEvent {
-    Key(crossterm::event::KeyEvent),
+    Key(KeyEvent),
     Tick,
     Resize,
 }

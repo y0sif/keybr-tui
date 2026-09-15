@@ -11,7 +11,7 @@
 
 # keybr-tui
 
-[![CI](https://github.com/y0sif/keybr-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/y0sif/keybr-tui/actions/workflows/ci.yml) [![Crates.io](https://img.shields.io/crates/v/keybr-tui.svg)](https://crates.io/crates/keybr-tui) [![docs.rs](https://img.shields.io/docsrs/keybr-tui)](https://docs.rs/keybr-tui) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![MSRV](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
+[![CI](https://github.com/y0sif/keybr-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/y0sif/keybr-tui/actions/workflows/ci.yml) [![Crates.io](https://img.shields.io/crates/v/keybr-tui.svg)](https://crates.io/crates/keybr-tui) [![docs.rs](https://img.shields.io/docsrs/keybr-tui)](https://docs.rs/keybr-tui) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![MSRV](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
 
 **Adaptive touch-typing practice for the terminal.** keybr-tui times every key you press, finds the ones slowing you down, and builds drills aimed straight at them. It is a faithful port of the [keybr.com](https://www.keybr.com) learning algorithm, runs entirely offline, and can [import your keybr.com history](#bring-your-keybrcom-history).
 

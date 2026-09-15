@@ -23,7 +23,9 @@ const NO_SAMPLE: &str = "—";
 
 /// Progress tier derived from confidence vs. target CPM.
 /// `Locked` keys haven't been unlocked by the scheduler yet.
-enum Tier {
+/// `pub(crate)` so the taria tree (`crate::tree`, unix only) reports the
+/// same tiers the human sees, from the same thresholds.
+pub(crate) enum Tier {
     Locked,
     Early,
     Progressing,
@@ -31,7 +33,7 @@ enum Tier {
 }
 
 impl Tier {
-    fn label(&self) -> &'static str {
+    pub(crate) fn label(&self) -> &'static str {
         match self {
             Tier::Locked => "Locked",
             Tier::Early => "Early",
@@ -50,7 +52,7 @@ impl Tier {
     }
 }
 
-fn tier_for(is_active: bool, stats: Option<&KeyStats>, target_cpm: f64) -> Tier {
+pub(crate) fn tier_for(is_active: bool, stats: Option<&KeyStats>, target_cpm: f64) -> Tier {
     if !is_active {
         return Tier::Locked;
     }
