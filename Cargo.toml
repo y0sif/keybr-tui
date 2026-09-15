@@ -27,6 +27,14 @@ toml = "0.8"
 serde_json = "1"
 directories = "6"
 
+# Only the unix build reads the local UTC offset through `localtime_r`; the
+# `#[cfg(not(unix))]` path in persistence.rs is a pure-Rust stub. crossterm
+# declares its own libc as optional and unix-gated, so it is not something
+# crossterm hands us on Windows — gate ours the same way rather than making
+# every target depend on libc directly.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [profile.release]
 lto = true
 codegen-units = 1

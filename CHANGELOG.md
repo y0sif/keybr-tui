@@ -42,6 +42,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Migrated from ratatui 0.29 to 0.30.2 (dropping the direct crossterm
   dependency).
 - MSRV raised from 1.75 to 1.88.
+### Fixed
+
+- Daily goal now rolls over at local midnight instead of UTC midnight. Previously an
+  evening session west of UTC was stamped with tomorrow's date, so the goal bar started
+  the next morning already (partly) full. The local offset comes from `libc::localtime_r`.
+  libc is a new dependency, declared under `[target.'cfg(unix)'.dependencies]` — crossterm
+  declares its own libc as optional and unix-gated, so it is not a dependency crossterm
+  supplies on every target.
+- `--import` now credits a keybr.com session to the local day it actually happened on.
+  Export timestamps are UTC, so matching them against the (now local) date string dropped
+  practice seconds from `today_seconds_practiced` for anyone not on UTC — an early-morning
+  session east of UTC, or an evening one west of it. The import instead compares
+  each timestamp against the UTC window `[local midnight, local midnight + 24h)`.
+- Both of the above apply to Linux and macOS only. On Windows nothing changes: the local
+  offset is read through `localtime_r`, which the Windows build does not use, so it falls
+  back to UTC — the daily goal there still rolls over at UTC midnight and `--import` still
+  credits sessions to the UTC day, exactly as before.
 
 ## [0.2.2] - 2026-07-23
 

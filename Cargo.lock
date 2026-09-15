@@ -762,6 +762,7 @@ dependencies = [
  "clap",
  "color-eyre",
  "directories",
+ "libc",
  "ratatui",
  "serde",
  "serde_json",

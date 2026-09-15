@@ -15,7 +15,10 @@ use serde::Deserialize;
 
 use crate::engine::LetterScheduler;
 use crate::metrics::KeyStats;
-use crate::persistence::{today_date_string, SavedKeyStats, SavedLessonResult, SavedStats};
+use crate::persistence::{
+    local_day_utc_bounds_at, today_date_string_at, unix_now_secs, SavedKeyStats, SavedLessonResult,
+    SavedStats,
+};
 
 /// One practice session as serialized by keybr.com's "Download data" button
 /// (`Result.toJSON()` in packages/keybr-result).
@@ -71,6 +74,23 @@ fn sample_is_plausible(time_to_type: u32) -> bool {
     time_to_type == 0 || (MIN_SAMPLE_MS..=MAX_SAMPLE_MS).contains(&time_to_type)
 }
 
+/// Does an export record's timestamp fall inside the half-open window
+/// `[start, end)`?
+///
+/// `time_stamp` is UTC and fixed width (`"2021-09-22T15:39:08.000Z"`), and so
+/// are the bounds (`"YYYY-MM-DDTHH:MM:SS"`), so byte-lexicographic order is
+/// chronological order and a plain string compare is a correct instant
+/// compare. A record stamped exactly at `start` sorts after it (`".000Z"` is
+/// a suffix) and is included; one stamped exactly at `end` sorts after `end`
+/// and is excluded — which is what half-open means.
+///
+/// This replaces a `starts_with(local_date)` prefix match, which was wrong the
+/// moment the date became local: the local day maps to a UTC window that
+/// straddles two UTC dates for every zone except UTC itself.
+fn timestamp_in_window(time_stamp: &str, start: &str, end: &str) -> bool {
+    time_stamp >= start && time_stamp < end
+}
+
 /// Outcome counters and headline numbers for the post-import report.
 #[derive(Debug, Default)]
 pub struct ImportSummary {
@@ -88,6 +108,29 @@ pub struct ImportSummary {
 /// Replay exported results in file order (the order is authoritative —
 /// keybr never re-sorts) and produce the equivalent `SavedStats`.
 pub fn replay(records: &[ExportRecord], target_cpm: f64) -> (SavedStats, ImportSummary) {
+    // One clock reading for both derived values. Reading it twice (once for the
+    // window, once for the date label) can straddle local midnight and stamp
+    // day D's practice seconds with day D+1's date.
+    let now = unix_now_secs();
+    // The UTC window matching the current *local* day — records are stamped in
+    // UTC while `today_date` is a local date, so they can only be compared
+    // through this window. `None` on the clock-error path.
+    let today_window = now.map(local_day_utc_bounds_at);
+    // Empty string on that same clock-error path, exactly what
+    // `today_date_string()` yields there.
+    let today_date = now.map(today_date_string_at).unwrap_or_default();
+    replay_with_window(records, target_cpm, today_window, today_date)
+}
+
+/// Core of [`replay`] with the "is this session today?" window and the local
+/// date label injected, so the daily-goal accounting can be tested without the
+/// wall clock or `TZ`. Both arguments must come from the same instant.
+fn replay_with_window(
+    records: &[ExportRecord],
+    target_cpm: f64,
+    today_window: Option<(String, String)>,
+    today_date: String,
+) -> (SavedStats, ImportSummary) {
     const HISTORY_CAP: usize = 50;
     const RECENT_TIMES_CAP: usize = 50;
 
@@ -96,7 +139,6 @@ pub fn replay(records: &[ExportRecord], target_cpm: f64) -> (SavedStats, ImportS
         ..ImportSummary::default()
     };
 
-    let today = today_date_string();
     let mut keys: HashMap<char, KeyStats> = HashMap::new();
     let mut lesson_history: Vec<SavedLessonResult> = Vec::new();
     let mut last_time_stamp = String::new();
@@ -158,8 +200,12 @@ pub fn replay(records: &[ExportRecord], target_cpm: f64) -> (SavedStats, ImportS
             lesson_history.remove(0);
         }
 
-        if record.time_stamp.starts_with(&today) && !today.is_empty() {
-            today_seconds += record.time / 1000;
+        // No window (clock before the epoch) → count nothing toward today,
+        // matching the old `!today.is_empty()` guard on the same failure path.
+        if let Some((start, end)) = &today_window {
+            if timestamp_in_window(&record.time_stamp, start, end) {
+                today_seconds += record.time / 1000;
+            }
         }
         summary.total_practice_secs += record.time / 1000;
         last_time_stamp = record.time_stamp.clone();
@@ -208,7 +254,7 @@ pub fn replay(records: &[ExportRecord], target_cpm: f64) -> (SavedStats, ImportS
         last_session: last_time_stamp,
         today_seconds_practiced: today_seconds.min(u32::MAX as u64) as u32,
         today_minutes_practiced: None,
-        today_date: today,
+        today_date,
         last_lesson: lesson_history.last().cloned(),
         lesson_history,
     };
@@ -286,6 +332,7 @@ pub fn run_import(path: &Path, target_cpm: f64, force: bool) -> color_eyre::Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::persistence::{datetime_string_from_unix_secs, today_date_string};
 
     fn entry(ch: char, hits: u32, misses: u32, time: u32) -> HistogramEntry {
         HistogramEntry {
@@ -539,6 +586,142 @@ mod tests {
         assert_eq!(saved.unlocked_letters, vec!['e', 'n', 'i', 'a', 'r', 'l']);
         assert!(saved.keys.is_empty());
         assert!(saved.last_lesson.is_none());
+    }
+
+    #[test]
+    fn record_east_of_utc_counts_toward_the_local_day_it_falls_in() {
+        // Local zone UTC+6 → the local Jan 16 is [Jan 15 18:00Z, Jan 16 18:00Z).
+        // A session at 20:30 UTC on Jan 15 is 02:30 local on Jan 16, so it must
+        // count toward today. The old prefix match against the local date
+        // "2025-01-16" would have missed it entirely.
+        let (start, end) = ("2025-01-15T18:00:00", "2025-01-16T18:00:00");
+        assert!(timestamp_in_window("2025-01-15T20:30:00.000Z", start, end));
+    }
+
+    #[test]
+    fn record_west_of_utc_counts_toward_the_local_day_it_falls_in() {
+        // Local zone UTC-6 → the local Jan 15 is [Jan 15 06:00Z, Jan 16 06:00Z).
+        // 01:00 UTC on Jan 16 is 19:00 local on Jan 15, so it counts toward
+        // today; the prefix match against "2025-01-15" would have missed it.
+        let (start, end) = ("2025-01-15T06:00:00", "2025-01-16T06:00:00");
+        assert!(timestamp_in_window("2025-01-16T01:00:00.000Z", start, end));
+    }
+
+    #[test]
+    fn records_outside_the_window_do_not_count() {
+        let (start, end) = ("2025-01-15T18:00:00", "2025-01-16T18:00:00");
+        // Well before.
+        assert!(!timestamp_in_window("2025-01-14T23:00:00.000Z", start, end));
+        // Well after.
+        assert!(!timestamp_in_window("2025-01-17T00:00:00.000Z", start, end));
+        // One second before the window opens.
+        assert!(!timestamp_in_window("2025-01-15T17:59:59.000Z", start, end));
+    }
+
+    #[test]
+    fn window_is_half_open() {
+        let (start, end) = ("2025-01-15T18:00:00", "2025-01-16T18:00:00");
+
+        // A real export stamp is 24 bytes ("...T18:00:00.000Z") and a bound is
+        // 19, so a record can never be byte-equal to a bound: the ".000Z"
+        // suffix decides both of the cases below whichever way the comparison
+        // operators point. They are the user-facing shape, so keep them...
+        assert!(timestamp_in_window("2025-01-15T18:00:00.000Z", start, end));
+        assert!(!timestamp_in_window("2025-01-16T18:00:00.000Z", start, end));
+        assert!(timestamp_in_window("2025-01-16T17:59:59.999Z", start, end));
+
+        // ...but only a bound-width value lands exactly ON a bound, which is
+        // the one input that tells `>=` from `>` and `<` from `<=`. Without
+        // these two asserts the operators are unpinned and the "half-open" in
+        // this test's name is decorative.
+        assert!(
+            timestamp_in_window(start, start, end),
+            "a value exactly at the start is inside the window (`>=`, not `>`)"
+        );
+        assert!(
+            !timestamp_in_window(end, start, end),
+            "a value exactly at the end is outside the window (`<`, not `<=`)"
+        );
+    }
+
+    fn dated_record(time_stamp: &str, time_ms: u64) -> ExportRecord {
+        let mut r = record(vec![
+            entry('e', 10, 0, 400),
+            entry('n', 10, 0, 400),
+            entry('i', 10, 0, 400),
+        ]);
+        r.time_stamp = time_stamp.to_string();
+        r.time = time_ms;
+        r
+    }
+
+    #[test]
+    fn replay_credits_only_sessions_inside_the_local_day_window() {
+        // End-to-end through the replay loop, with the window injected so the
+        // test depends on neither the wall clock nor `TZ`.
+        // Local zone UTC+6, local "today" is Jan 16 → [Jan 15 18:00Z, Jan 16 18:00Z).
+        let window = Some((
+            "2025-01-15T18:00:00".to_string(),
+            "2025-01-16T18:00:00".to_string(),
+        ));
+        let records = vec![
+            // 20:30Z Jan 15 = 02:30 local Jan 16 → today. The pre-fix prefix
+            // match against "2025-01-16" dropped exactly this record.
+            dated_record("2025-01-15T20:30:00.000Z", 30_000),
+            // Past the window: tomorrow locally.
+            dated_record("2025-01-16T19:00:00.000Z", 60_000),
+        ];
+        let (saved, summary) =
+            replay_with_window(&records, 175.0, window, "2025-01-16".to_string());
+        assert_eq!(summary.imported, 2);
+        // Only the in-window session counts toward the daily goal...
+        assert_eq!(saved.today_seconds_practiced, 30);
+        // ...while both still count toward all-time practice.
+        assert_eq!(summary.total_practice_secs, 90);
+    }
+
+    #[test]
+    fn replay_credits_nothing_to_today_without_a_window() {
+        // Clock-error path: `unix_now_secs()` returns None, so `replay()` passes
+        // down no window and an empty date, and nothing is credited to the
+        // daily goal — same as the old `!today.is_empty()` guard did when
+        // `today_date_string()` returned "".
+        let records = vec![dated_record("2025-01-15T20:30:00.000Z", 30_000)];
+        let (saved, summary) = replay_with_window(&records, 175.0, None, String::new());
+        assert_eq!(summary.imported, 1);
+        assert_eq!(saved.today_seconds_practiced, 0);
+        assert_eq!(summary.total_practice_secs, 30);
+    }
+
+    #[test]
+    fn replay_credits_a_session_stamped_now_through_the_live_clock() {
+        // The only test that goes through the real `replay()` entry point, so
+        // the only cover for its live-clock wiring. Break either derived value
+        // in `replay()` — window to `None`, or the date label to a literal —
+        // and one of the two asserts below fails; every other import test
+        // injects both and so leaves those lines untested.
+        //
+        // `local_day_utc_bounds_at(now)` always contains `now`, so a record
+        // stamped at the instant this test reads the clock is inside the window
+        // `replay()` builds from its own (marginally later) reading. The one
+        // way that fails is local midnight falling in the microseconds between
+        // the two readings, which would also move `today_date_string()` below.
+        let now = unix_now_secs().expect("system clock before the epoch");
+        let stamp = format!("{}.000Z", datetime_string_from_unix_secs(now));
+        let (saved, summary) = replay(&[dated_record(&stamp, 30_000)], 175.0);
+
+        assert_eq!(summary.imported, 1);
+        assert!(
+            saved.today_seconds_practiced > 0,
+            "a session stamped at the current instant ({stamp}) must count \
+             toward the daily goal, got {} seconds",
+            saved.today_seconds_practiced
+        );
+        assert_eq!(
+            saved.today_date,
+            today_date_string(),
+            "the seconds credited to today must be labelled with today's local date"
+        );
     }
 
     #[test]
