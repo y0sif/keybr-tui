@@ -84,6 +84,22 @@ pub struct Config {
     /// would make `Config::save()` error — the key is omitted instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub focus_letter: Option<char>,
+
+    /// User-pinned combination drill: a bigram (`"cr"`) or a word ending
+    /// (`"-tion"`), in `FocusRule::config_value` spelling. `None` means no
+    /// pattern pin. A usable value here outranks `focus_letter`; the two
+    /// resolve to one runtime pin in `App::set_manual_focus_from_config`.
+    ///
+    /// Deliberately a second key rather than a widened `focus_letter`.
+    /// `focus_letter` is a `char`, so an older keybr-tui reading `"cr"`
+    /// there would fail to parse the file, and `load()` answers a parse
+    /// failure by discarding the *whole* config: target WPM, error mode,
+    /// fragment length and alphabet size would all silently reset. An
+    /// unknown key is ignored instead, which costs the user nothing but
+    /// the pin. `skip_serializing_if` for the same reason as
+    /// `focus_letter`: TOML cannot represent `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focus_pattern: Option<String>,
 }
 
 impl Default for Config {
@@ -96,6 +112,7 @@ impl Default for Config {
             daily_goal_minutes: default_daily_goal_minutes(),
             alphabet_size: default_alphabet_size(),
             focus_letter: None,
+            focus_pattern: None,
         }
     }
 }
@@ -172,6 +189,7 @@ mod tests {
             daily_goal_minutes: 45,
             alphabet_size: 0.35,
             focus_letter: Some('c'),
+            focus_pattern: None,
         };
         let serialized = toml::to_string_pretty(&cfg).unwrap();
         let deserialized: Config = toml::from_str(&serialized).unwrap();
@@ -182,6 +200,123 @@ mod tests {
         assert_eq!(deserialized.daily_goal_minutes, 45);
         assert_eq!(deserialized.alphabet_size, 0.35);
         assert_eq!(deserialized.focus_letter, Some('c'));
+        assert_eq!(deserialized.focus_pattern, None);
+    }
+
+    #[test]
+    fn config_focus_pattern_roundtrips() {
+        let cfg = Config {
+            focus_pattern: Some("-tion".to_string()),
+            ..Config::default()
+        };
+        let serialized = toml::to_string_pretty(&cfg).unwrap();
+        let deserialized: Config = toml::from_str(&serialized).unwrap();
+        assert_eq!(deserialized.focus_pattern, Some("-tion".to_string()));
+        assert_eq!(deserialized.focus_letter, None);
+    }
+
+    #[test]
+    fn config_focus_pattern_none_is_omitted() {
+        // Same contract as `focus_letter`: TOML has no `None`, so the key
+        // must be omitted rather than serialized.
+        let cfg = Config::default();
+        let serialized = toml::to_string_pretty(&cfg).unwrap();
+        assert!(!serialized.contains("focus_pattern"));
+        let deserialized: Config = toml::from_str(&serialized).unwrap();
+        assert_eq!(deserialized.focus_pattern, None);
+    }
+
+    #[test]
+    fn config_with_focus_pattern_keeps_every_other_field() {
+        // A file this build wrote: `focus_pattern` set alongside every
+        // other setting. All of them must come back as written rather
+        // than falling back to defaults. The back-compat half of the
+        // story, an older build meeting a key it does not know, is
+        // `unknown_key_is_ignored_instead_of_failing_the_load` below.
+        let toml_str = r#"
+            target_wpm = 65
+            error_mode = "stop-on-error"
+            fragment_length = 140
+            natural_words = false
+            daily_goal_minutes = 15
+            alphabet_size = 0.4
+            focus_pattern = "cr"
+        "#;
+        let cfg: Config = toml::from_str(toml_str).expect("focus_pattern must parse");
+        assert_eq!(cfg.focus_pattern, Some("cr".to_string()));
+        // Everything else survived rather than falling back to defaults.
+        assert_eq!(cfg.target_wpm, 65);
+        assert_eq!(cfg.error_mode, ErrorModeSerde::StopOnError);
+        assert_eq!(cfg.fragment_length, 140);
+        assert!(!cfg.natural_words);
+        assert_eq!(cfg.daily_goal_minutes, 15);
+        assert_eq!(cfg.alphabet_size, 0.4);
+    }
+
+    #[test]
+    fn config_with_only_focus_letter_still_loads() {
+        // A config file written by a pre-pattern build.
+        let toml_str = r#"
+            target_wpm = 45
+            focus_letter = "r"
+        "#;
+        let cfg: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.target_wpm, 45);
+        assert_eq!(cfg.focus_letter, Some('r'));
+        assert_eq!(cfg.focus_pattern, None);
+    }
+
+    #[test]
+    fn unknown_key_is_ignored_instead_of_failing_the_load() {
+        // The guarantee that made `focus_pattern` a separate key rather
+        // than a wider `focus_letter`: an older keybr-tui reading a
+        // config this build wrote must ignore the key it does not know.
+        // `load()` answers a parse error by throwing the whole file away,
+        // so a rejected key would silently reset target WPM, error mode,
+        // fragment length and alphabet size too.
+        //
+        // `Config` carries no `deny_unknown_fields`, which is what makes
+        // that true, so this tests it directly with a key no build knows
+        // rather than with `focus_pattern`, which this build does know.
+        let toml_str = r#"
+            target_wpm = 65
+            error_mode = "stop-on-error"
+            fragment_length = 140
+            natural_words = false
+            daily_goal_minutes = 15
+            alphabet_size = 0.4
+            focus_letter = "r"
+            focus_from_the_future = "whatever this turns out to be"
+        "#;
+        let cfg: Config = toml::from_str(toml_str).expect("an unknown key must not fail the load");
+        assert_eq!(cfg.target_wpm, 65);
+        assert_eq!(cfg.error_mode, ErrorModeSerde::StopOnError);
+        assert_eq!(cfg.fragment_length, 140);
+        assert!(!cfg.natural_words);
+        assert_eq!(cfg.daily_goal_minutes, 15);
+        assert_eq!(cfg.alphabet_size, 0.4);
+        assert_eq!(cfg.focus_letter, Some('r'));
+    }
+
+    #[test]
+    fn unrecognised_focus_pattern_value_is_a_dropped_pin() {
+        // An unknown *value* under a known key, which is what a retired
+        // preset or a hand-edited typo looks like. Parsing must still
+        // succeed and leave the rest of the config alone; the pin is
+        // dropped later, when `FocusRule::from_config` fails to resolve
+        // it, not by rejecting the file.
+        let toml_str = r#"
+            target_wpm = 65
+            focus_pattern = "banana"
+        "#;
+        let cfg: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.target_wpm, 65);
+        assert_eq!(cfg.focus_pattern, Some("banana".to_string()));
+        assert_eq!(
+            crate::engine::filter::FocusRule::from_config(cfg.focus_pattern.as_deref().unwrap()),
+            None,
+            "an unrecognised value must resolve to no pin",
+        );
     }
 
     #[test]

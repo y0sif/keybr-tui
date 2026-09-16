@@ -82,7 +82,13 @@ pub fn key_tile_spans(
 pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let active_set: std::collections::HashSet<char> =
         app.scheduler.active_keys.iter().copied().collect();
-    let focused = app.effective_focus();
+    // Every letter the focus rule involves lights up, so a combination
+    // drill highlights both halves of its reach and a single-key focus
+    // stays the one-tile case it always was.
+    let focus_letters: Vec<char> = app
+        .effective_focus()
+        .map(|rule| rule.letters())
+        .unwrap_or_default();
     // A stale pin falls back to auto inside `focus_is_pinned` and
     // renders as such.
     let focus_is_pinned = app.focus_is_pinned();
@@ -99,7 +105,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
             .get(&key)
             .map(|s| s.best_confidence(app.target_cpm))
             .unwrap_or(0.0);
-        let is_focused = focused == Some(key);
+        let is_focused = focus_letters.contains(&key);
 
         spans.extend(key_tile_spans(
             key,

@@ -18,7 +18,7 @@ use taria_ratatui::taria::{Action, Node, Role};
 use crate::app::{App, AppScreen, ErrorMode};
 use crate::components::menu::MENU_ITEMS;
 use crate::components::progress::tier_for;
-use crate::components::settings::SETTINGS_COUNT;
+use crate::components::settings::{focus_letter_value, focus_pattern_value, SETTINGS_COUNT};
 use crate::engine::scheduler::{forced_extra_letters, UNLOCK_ORDER};
 
 /// Id space for the main menu's rows: `menu-start-practice`, and so on.
@@ -42,6 +42,7 @@ pub const SETTING_SLUGS: [&str; SETTINGS_COUNT] = [
     "fragment-length",
     "alphabet-size",
     "focus-letter",
+    "focus-pattern",
 ];
 
 /// Lowercased, dash-separated form of a menu label ("Start Practice" ->
@@ -238,10 +239,6 @@ fn settings_nodes(app: &App) -> Vec<Node> {
         ErrorMode::ForgiveMistakes => "Forgive Mistakes",
         ErrorMode::StopOnError => "Stop On Error",
     };
-    let focus_label = match app.manual_focus {
-        Some(c) => c.to_ascii_uppercase().to_string(),
-        None => "Auto".to_string(),
-    };
     let rows: [(&str, String); SETTINGS_COUNT] = [
         ("Target WPM", app.target_wpm().to_string()),
         ("Error Mode", mode_label.to_string()),
@@ -250,7 +247,8 @@ fn settings_nodes(app: &App) -> Vec<Node> {
             "Alphabet size",
             format!("+{} letters", forced_extra_letters(app.alphabet_size)),
         ),
-        ("Focus letter", focus_label),
+        ("Focus letter", focus_letter_value(app)),
+        ("Focus pattern", focus_pattern_value(app)),
     ];
     let children = rows.into_iter().enumerate().map(|(i, (label, value))| {
         Node::new(setting_id(i), Role::ListItem)
@@ -271,6 +269,7 @@ fn settings_nodes(app: &App) -> Vec<Node> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::filter::FocusRule;
 
     fn count_focused(nodes: &[Node]) -> usize {
         nodes
@@ -446,6 +445,10 @@ mod tests {
             ("setting-fragment-length", "100"),
             ("setting-alphabet-size", "+0 letters"),
             ("setting-focus-letter", "Auto"),
+            // A fresh profile reaches no drill at all, so the row says so
+            // instead of publishing an empty value or an "Off" that
+            // implies something could be switched on.
+            ("setting-focus-pattern", "None yet"),
         ];
         for (id, value) in expect {
             let node = find(&nodes, id).expect(id);
@@ -454,6 +457,89 @@ mod tests {
             assert!(node.actions.contains(&Action::Custom("increase".into())));
             assert!(node.actions.contains(&Action::Custom("decrease".into())));
         }
+    }
+
+    #[test]
+    fn focus_rows_publish_the_pinned_value() {
+        let mut app = App::new();
+        app.screen = AppScreen::Settings;
+        app.scheduler.active_keys = ('a'..='z').collect();
+        // Writing `active_keys` by hand skips `App::run_scheduler_update`,
+        // which is what normally refreshes the derived drill list.
+        app.refresh_available_patterns();
+
+        // A letter pin shows on the letter row and leaves the pattern row Off.
+        app.manual_focus = Some(FocusRule::Key('r'));
+        let nodes = build_nodes(&app);
+        assert_eq!(
+            find(&nodes, "setting-focus-letter")
+                .unwrap()
+                .value
+                .as_deref(),
+            Some("R")
+        );
+        assert_eq!(
+            find(&nodes, "setting-focus-pattern")
+                .unwrap()
+                .value
+                .as_deref(),
+            Some("Off")
+        );
+
+        // And the other way round.
+        app.manual_focus = Some(FocusRule::Suffix("tion"));
+        let nodes = build_nodes(&app);
+        assert_eq!(
+            find(&nodes, "setting-focus-letter")
+                .unwrap()
+                .value
+                .as_deref(),
+            Some("Auto")
+        );
+        assert_eq!(
+            find(&nodes, "setting-focus-pattern")
+                .unwrap()
+                .value
+                .as_deref(),
+            Some("-TION")
+        );
+    }
+
+    #[test]
+    fn pattern_row_does_not_publish_a_drill_that_is_not_on_offer() {
+        // Every letter of "-ous" is unlocked at ten letters, but only one
+        // word backs it, so it is not a drill the row can offer. The row
+        // must say "Off" rather than name a pin the generator is ignoring.
+        let mut app = App::new();
+        app.screen = AppScreen::Settings;
+        app.scheduler.active_keys = UNLOCK_ORDER[..10].to_vec();
+        app.refresh_available_patterns();
+        app.manual_focus = Some(FocusRule::Suffix("ous"));
+        assert!(!app.focus_is_pinned(), "the pin is not in effect");
+        let nodes = build_nodes(&app);
+        assert_eq!(
+            find(&nodes, "setting-focus-pattern")
+                .unwrap()
+                .value
+                .as_deref(),
+            Some("Off")
+        );
+    }
+
+    #[test]
+    fn pattern_row_says_none_yet_when_no_drill_is_reachable() {
+        let mut app = App::new();
+        app.screen = AppScreen::Settings;
+        app.scheduler.active_keys = vec!['e', 'n', 'i', 'a'];
+        app.refresh_available_patterns();
+        let nodes = build_nodes(&app);
+        assert_eq!(
+            find(&nodes, "setting-focus-pattern")
+                .unwrap()
+                .value
+                .as_deref(),
+            Some("None yet")
+        );
     }
 
     #[test]

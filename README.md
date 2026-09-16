@@ -51,7 +51,7 @@ Every session feeds a per-key model of how fast and accurately you type. keybr-t
 
 1. **Start small.** You begin with a handful of letters, not the whole keyboard.
 2. **Earn the rest.** A new letter unlocks only once your active set reaches a confidence threshold, measured against your target speed.
-3. **Drill the weak spot.** The slowest key in your active set becomes the focus key and shows up more often in the text you are given.
+3. **Drill the weak spot.** The slowest key in your active set becomes the focus key and shows up more often in the text you are given. You can pin this yourself in Settings too, either to one letter or to one of 16 preset combination drills (bigram reaches like `cr`, word endings like `-tion`), which appear once your unlocked letters can spell enough real words to fill a lesson. A fresh profile reaches none of them; the first arrives with your seventh letter and the last by your twenty-first.
 4. **Read like words.** A phonetic Markov chain builds pronounceable pseudo-words from your active letters, so practice never feels like random noise.
 5. **Learn from each key.** Every keystroke's reaction time updates a smoothed per-key average, the same calculation keybr.com runs.
 
@@ -130,6 +130,7 @@ fragment_length = 100
 | `daily_goal_minutes` | `30` | Daily practice goal in minutes; `0` hides the daily-goal indicator |
 | `alphabet_size` | `0.0` | Fraction of the non-starter alphabet to force-unlock regardless of confidence (keybr's `alphabetSize`), clamped to the range 0.0 to 1.0 |
 | `focus_letter` | `unset` | Pins one unlocked letter, given as a single letter (a-z), so every generated word contains it; omit the key (or cycle the Settings "Focus letter" row to Auto) for the automatic weakest-key focus |
+| `focus_pattern` | `unset` | Pins one combination drill: a bigram (`"cr"`, `"pl"`, `"br"`, `"tr"`, `"gr"`, `"fr"`, `"bl"`, `"cl"`) or a word ending (`"-ing"`, `"-ed"`, `"-er"`, `"-ly"`, `"-tion"`, `"-ment"`, `"-able"`, `"-ous"`), so every generated word matches it instead of just containing one letter; only takes effect while the pattern is on offer, meaning its letters are unlocked and the dictionary has at least 8 distinct words for it, and setting it clears `focus_letter` since the two share one focus slot |
 
 </details>
 
