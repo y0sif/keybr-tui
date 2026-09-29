@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-09-29
+
+### Fixed
+
+- The daily goal now rolls over at local midnight on Windows too (#11), and
+  `--import` credits keybr.com sessions to the local day there. The offset is
+  read from the active Windows time zone, including daylight saving time.
+- The crate builds on unix targets whose libc `struct tm` has no `tm_gmtoff`
+  (Solaris, illumos, AIX, VxWorks, QuRT and newlib targets) (#12). They fall
+  back to UTC day rollover. Not release targets, but `cargo install` works
+  there now.
+
 ## [0.2.3] - 2026-09-29
 
 ### Added
