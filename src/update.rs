@@ -13,6 +13,7 @@ use taria_ratatui::to_crossterm_key;
 use crate::app::{App, AppScreen, ErrorMode};
 use crate::components::menu::MENU_ITEMS;
 use crate::components::settings::SETTINGS_COUNT;
+use crate::engine::filter::FocusRule;
 use crate::events::AppEvent;
 use crate::persistence::today_date_string;
 #[cfg(unix)]
@@ -433,27 +434,60 @@ fn handle_progress_key(app: &mut App, key: KeyEvent) {
 
 // --- Settings screen ---
 
-/// Step the manual focus pin through `[Auto] + active_keys` (unlock
-/// order), wrapping at both ends. `forward` is the Right key. A stale
-/// pin (letter no longer in `active_keys`) counts as Auto, matching
-/// how `App::effective_focus` treats it.
-fn cycle_manual_focus(app: &mut App, forward: bool) {
-    let keys = &app.scheduler.active_keys;
-    let total = keys.len() + 1;
-    let current = app
-        .manual_focus
-        .and_then(|c| keys.iter().position(|&k| k == c))
-        .map_or(0, |i| i + 1);
-    let next = if forward {
+/// Index of the current pin inside a `[none] + values` cycle, where 0 is
+/// the "none" slot, plus the index the step lands on. Shared by both
+/// focus rows so they wrap identically.
+fn cycle_index(current: Option<usize>, len: usize, forward: bool) -> usize {
+    let total = len + 1;
+    let current = current.map_or(0, |i| i + 1);
+    if forward {
         (current + 1) % total
     } else {
         (current + total - 1) % total
-    };
-    app.manual_focus = if next == 0 {
-        None
-    } else {
-        Some(keys[next - 1])
-    };
+    }
+}
+
+/// Step the manual focus pin through `[Auto] + active_keys` (unlock
+/// order), wrapping at both ends. `forward` is the Right key. A stale
+/// pin (letter no longer in `active_keys`) counts as Auto, matching
+/// how `App::effective_focus` treats it, and so does a pattern pin:
+/// stepping off Auto here therefore replaces it, which is how the two
+/// rows stay mutually exclusive without either checking the other.
+fn cycle_manual_focus(app: &mut App, forward: bool) {
+    let keys = &app.scheduler.active_keys;
+    let current = app.manual_focus.and_then(|rule| match rule {
+        FocusRule::Key(c) => keys.iter().position(|&k| k == c),
+        _ => None,
+    });
+    let next = cycle_index(current, keys.len(), forward);
+    app.manual_focus = (next > 0).then(|| FocusRule::Key(keys[next - 1]));
+}
+
+/// Step the manual focus pin through `[Off] + available_patterns()`,
+/// wrapping at both ends. `forward` is the Right key.
+///
+/// The mirror of `cycle_manual_focus`: a letter pin counts as Off here,
+/// so stepping off Off replaces it. Both write the one `manual_focus`
+/// field, which is what makes a letter pin and a pattern pin impossible
+/// to hold at once.
+///
+/// With no drill available (an early profile, too few letters unlocked)
+/// there is nothing to step to, so any existing pin is left alone rather
+/// than cleared by a row that cannot offer a replacement. `false` says
+/// exactly that happened, so the caller can skip the config save for a
+/// row that changed nothing.
+fn cycle_manual_pattern(app: &mut App, forward: bool) -> bool {
+    let patterns = app.available_patterns();
+    if patterns.is_empty() {
+        return false;
+    }
+    let current = app
+        .manual_focus
+        .and_then(|rule| patterns.iter().position(|&p| p == rule));
+    let next = cycle_index(current, patterns.len(), forward);
+    let picked = (next > 0).then(|| patterns[next - 1]);
+    app.manual_focus = picked;
+    true
 }
 
 fn handle_settings_key(app: &mut App, key: KeyEvent) {
@@ -475,11 +509,14 @@ fn handle_settings_key(app: &mut App, key: KeyEvent) {
             app.settings_selection = (app.settings_selection + 1) % SETTINGS_COUNT;
         }
         Left => {
-            match app.settings_selection {
+            // Each arm reports whether it actually changed a setting, so a
+            // row with nothing to offer does not mark the config dirty.
+            let changed = match app.settings_selection {
                 0 => {
                     // Decrease target WPM
                     let new_wpm = app.target_wpm().saturating_sub(5).max(10);
                     app.set_target_wpm(new_wpm);
+                    true
                 }
                 1 => {
                     // Toggle error mode
@@ -487,31 +524,46 @@ fn handle_settings_key(app: &mut App, key: KeyEvent) {
                         ErrorMode::ForgiveMistakes => ErrorMode::StopOnError,
                         ErrorMode::StopOnError => ErrorMode::ForgiveMistakes,
                     };
+                    true
                 }
                 2 => {
                     // Decrease fragment length
                     app.fragment_length = app.fragment_length.saturating_sub(10).max(20);
+                    true
                 }
                 3 => {
                     // Decrease alphabet size (one forced letter per 0.05 step).
                     // Round to 2 decimals so repeated steps don't drift.
+                    // This moves the scheduler's setting, not `active_keys`:
+                    // the letters it forces are added by the next
+                    // `run_scheduler_update`, which refreshes the drill list.
                     app.alphabet_size = ((app.alphabet_size - 0.05).max(0.0) * 100.0).round() / 100.0;
                     app.scheduler.alphabet_size = app.alphabet_size;
+                    true
                 }
                 4 => {
                     // Step focus letter backward (Auto wraps to last unlocked).
                     cycle_manual_focus(app, false);
+                    true
                 }
-                _ => {}
+                5 => {
+                    // Step focus pattern backward (Off wraps to the last drill).
+                    cycle_manual_pattern(app, false)
+                }
+                _ => false,
+            };
+            if changed {
+                request_config_save(app);
             }
-            request_config_save(app);
         }
         Right => {
-            match app.settings_selection {
+            // Mirror of Left: only a real change requests a config save.
+            let changed = match app.settings_selection {
                 0 => {
                     // Increase target WPM
                     let new_wpm = (app.target_wpm() + 5).min(200);
                     app.set_target_wpm(new_wpm);
+                    true
                 }
                 1 => {
                     // Toggle error mode
@@ -519,23 +571,35 @@ fn handle_settings_key(app: &mut App, key: KeyEvent) {
                         ErrorMode::ForgiveMistakes => ErrorMode::StopOnError,
                         ErrorMode::StopOnError => ErrorMode::ForgiveMistakes,
                     };
+                    true
                 }
                 2 => {
                     // Increase fragment length
                     app.fragment_length = (app.fragment_length + 10).min(500);
+                    true
                 }
                 3 => {
                     // Increase alphabet size (one forced letter per 0.05 step).
+                    // See the Left arm: `active_keys` moves at the next
+                    // `run_scheduler_update`, not here.
                     app.alphabet_size = ((app.alphabet_size + 0.05).min(1.0) * 100.0).round() / 100.0;
                     app.scheduler.alphabet_size = app.alphabet_size;
+                    true
                 }
                 4 => {
                     // Step focus letter forward (last unlocked wraps to Auto).
                     cycle_manual_focus(app, true);
+                    true
                 }
-                _ => {}
+                5 => {
+                    // Step focus pattern forward (the last drill wraps to Off).
+                    cycle_manual_pattern(app, true)
+                }
+                _ => false,
+            };
+            if changed {
+                request_config_save(app);
             }
-            request_config_save(app);
         }
         Enter
             // Toggle error mode on Enter when selected
@@ -861,7 +925,7 @@ mod tests {
 
         // Auto -> first unlocked letter ('e' heads the unlock order).
         update(&mut app, AppEvent::Key(make_key(KeyCode::Right)));
-        assert_eq!(app.manual_focus, Some('e'));
+        assert_eq!(app.manual_focus, Some(FocusRule::Key('e')));
         assert!(app.pending_config_save, "pin change must request a save");
 
         // Stepping through the remaining unlocked letters lands back on Auto.
@@ -880,12 +944,129 @@ mod tests {
         assert_eq!(app.manual_focus, None);
 
         update(&mut app, AppEvent::Key(make_key(KeyCode::Left)));
-        assert_eq!(app.manual_focus, app.scheduler.active_keys.last().copied());
+        assert_eq!(
+            app.manual_focus,
+            app.scheduler
+                .active_keys
+                .last()
+                .copied()
+                .map(FocusRule::Key)
+        );
         assert!(app.pending_config_save);
 
         // And one step forward returns to Auto.
         update(&mut app, AppEvent::Key(make_key(KeyCode::Right)));
         assert_eq!(app.manual_focus, None);
+    }
+
+    // --- Focus pattern row (combination drills) ---
+
+    /// A profile with the whole alphabet unlocked, which is what makes
+    /// the combination drills reachable, parked on the pattern row.
+    ///
+    /// Writing `active_keys` by hand skips `App::run_scheduler_update`,
+    /// so the derived drill list is refreshed the same way that path
+    /// does it.
+    fn app_on_pattern_row() -> App {
+        let mut app = App::new();
+        app.screen = AppScreen::Settings;
+        app.settings_selection = 5;
+        app.scheduler.active_keys = ('a'..='z').collect();
+        app.refresh_available_patterns();
+        app
+    }
+
+    #[test]
+    fn settings_pattern_right_cycles_and_wraps_to_off() {
+        let mut app = app_on_pattern_row();
+        let patterns = app.available_patterns().to_vec();
+        assert!(!patterns.is_empty(), "full alphabet must offer drills");
+        assert_eq!(app.manual_focus, None);
+
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Right)));
+        assert_eq!(app.manual_focus, Some(patterns[0]));
+        assert!(app.pending_config_save, "pin change must request a save");
+
+        // Stepping through the rest lands back on Off.
+        for _ in 0..patterns.len() {
+            update(&mut app, AppEvent::Key(make_key(KeyCode::Right)));
+        }
+        assert_eq!(app.manual_focus, None);
+    }
+
+    #[test]
+    fn settings_pattern_left_from_off_wraps_to_last_drill() {
+        let mut app = app_on_pattern_row();
+        let patterns = app.available_patterns().to_vec();
+
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Left)));
+        assert_eq!(app.manual_focus, patterns.last().copied());
+        assert!(app.pending_config_save);
+
+        // Walking back the other way returns to Off.
+        for _ in 0..patterns.len() {
+            update(&mut app, AppEvent::Key(make_key(KeyCode::Left)));
+        }
+        assert_eq!(app.manual_focus, None);
+    }
+
+    #[test]
+    fn choosing_a_pattern_clears_a_letter_pin() {
+        let mut app = app_on_pattern_row();
+        app.manual_focus = Some(FocusRule::Key('r'));
+
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Right)));
+        let pinned = app.manual_focus.expect("a drill must now be pinned");
+        assert!(
+            !matches!(pinned, FocusRule::Key(_)),
+            "the letter pin must be gone, got {pinned:?}"
+        );
+    }
+
+    #[test]
+    fn choosing_a_letter_clears_a_pattern_pin() {
+        let mut app = app_on_pattern_row();
+        app.manual_focus = Some(FocusRule::Contains("cr"));
+        app.settings_selection = 4;
+
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Right)));
+        // A pattern reads as Auto on the letter row, so one step right
+        // lands on the first unlocked letter and the pattern is gone.
+        assert_eq!(
+            app.manual_focus,
+            app.scheduler
+                .active_keys
+                .first()
+                .copied()
+                .map(FocusRule::Key)
+        );
+    }
+
+    #[test]
+    fn pattern_row_is_inert_when_no_drill_is_available() {
+        // Too few letters to spell any drill: the row has nothing to
+        // offer, and must not clear an existing letter pin either.
+        let mut app = App::new();
+        app.screen = AppScreen::Settings;
+        app.settings_selection = 5;
+        app.scheduler.active_keys = vec!['e', 'n', 'i', 'a'];
+        app.refresh_available_patterns();
+        assert!(app.available_patterns().is_empty());
+
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Right)));
+        assert_eq!(app.manual_focus, None);
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Left)));
+        assert_eq!(app.manual_focus, None);
+
+        app.manual_focus = Some(FocusRule::Key('r'));
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Right)));
+        assert_eq!(app.manual_focus, Some(FocusRule::Key('r')));
+
+        // Nothing changed, so nothing is owed to the config file.
+        assert!(
+            !app.pending_config_save,
+            "a row with nothing to offer must not mark the config dirty"
+        );
     }
 
     // --- Deferred persistence: update must only raise flags, never write ---

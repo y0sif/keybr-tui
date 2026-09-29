@@ -43,6 +43,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gated `#[cfg(unix)]`, including the semantic tree module. Windows builds are
   taria-free: same screens, same keys, same files, with no agent surface. The
   ratatui 0.30.2 migration below still applies to them.
+- Combination drills (#9, the second half of #7): a "Focus pattern" row in Settings
+  pins one of 16 preset drills, 8 bigram reaches (`cr`, `pl`, `br`, `tr`, `gr`, `fr`,
+  `bl`, `cl`) and 8 word endings (`-ing`, `-ed`, `-er`, `-ly`, `-tion`, `-ment`,
+  `-able`, `-ous`), so every generated word matches the whole pattern instead of just
+  containing one letter. Left/Right cycles Off plus whichever presets the embedded
+  dictionary can currently fill with your unlocked letters, meaning at least 8 distinct
+  real words, enough for a lesson rather than one word repeated. The row therefore opens
+  empty and reads "None yet" on a fresh profile, offers its first drill (`-ER`) once your
+  seventh letter unlocks, and has all 16 by 21 letters: combination drills are for a
+  profile past the basics. Drills draw from the embedded word list even with `natural_words` off,
+  since a pattern has nothing to drill without real words. Picking a pattern clears
+  any letter pin and vice versa, since the two share one focus slot. The pin persists
+  in `config.toml` as a new `focus_pattern` key; `focus_letter` is unchanged.
 
 ### Changed
 

@@ -146,10 +146,15 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         Style::default().fg(Color::DarkGray),
     )));
 
-    let focused = app.effective_focus();
+    // A combination drill marks every letter it involves, so the "< Focus"
+    // column reads the same way for a bigram as for a single key.
+    let focus_letters: Vec<char> = app
+        .effective_focus()
+        .map(|rule| rule.letters())
+        .unwrap_or_default();
     for &key in UNLOCK_ORDER {
         let is_active = active_set.contains(&key);
-        let is_focused = focused == Some(key);
+        let is_focused = focus_letters.contains(&key);
 
         let stats = app.per_key_stats.get(&key);
         let tier = tier_for(is_active, stats, app.target_cpm);

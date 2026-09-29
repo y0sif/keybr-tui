@@ -37,6 +37,18 @@ Any modern emulator that supports a true-color or 256-color ANSI palette and a m
 
 That is the adaptive algorithm working as designed. keybr-tui identifies your lowest-confidence key — the "focus key" — and biases generated text toward it until your accuracy and speed on that key catch up to the rest.
 
+## Can I drill specific letter combinations, like word endings?
+
+Yes. Settings has a "Focus pattern" row, cycled with Left/Right like the other rows,
+offering 16 presets: 8 bigram reaches (`cr`, `pl`, `br`, `tr`, `gr`, `fr`, `bl`, `cl`)
+and 8 word endings (`-ing`, `-ed`, `-er`, `-ly`, `-tion`, `-ment`, `-able`, `-ous`). A
+preset only shows up once your unlocked letters can spell enough real words to fill a
+lesson, so the list starts empty and grows as you unlock more. A fresh profile reaches
+none of them and the row reads "None yet"; the first drill, `-ER`, arrives with your
+seventh letter, and all 16 are available by 21 letters. Picking a pattern clears any
+letter pin, since only one focus can be active at a time, and drills always draw from
+the embedded word list, regardless of the "natural words" setting.
+
 ## How do I change my target WPM?
 
 Edit `~/.config/keybr-tui/config.toml` and set the `target_wpm` field. The config file is not auto-created on first run; see the README's configuration section for a template.

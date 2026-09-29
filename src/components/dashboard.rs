@@ -28,6 +28,7 @@ use ratatui::{
 
 use crate::app::{lesson_score, App};
 use crate::components::key_bar;
+use crate::engine::filter::FocusRule;
 
 /// Width reserved for row labels (e.g. "Metrics:    "). Keeps section
 /// values left-aligned in a consistent column across all four rows.
@@ -211,11 +212,21 @@ fn render_current_key_row(app: &App, frame: &mut Frame, area: Rect) {
 
     let mut spans: Vec<Span<'static>> = vec![label_span("Current:")];
 
-    let Some(focused) = app.effective_focus() else {
+    let Some(rule) = app.effective_focus() else {
         // No focused key (every active key is "learned"). Say so
         // explicitly rather than leaving the row blank — that's a
         // milestone worth highlighting.
         spans.push(Span::styled("all keys at target speed", dim));
+        render_row(frame, area, spans);
+        return;
+    };
+
+    let FocusRule::Key(focused) = rule else {
+        // A combination drill has no bucket in `per_key_stats`, which is
+        // keyed by single characters: there is no wpm for "CR". Name the
+        // drill rather than invent numbers for it or borrow one letter's.
+        spans.push(Span::styled(rule.label(), strong));
+        spans.push(Span::styled("  combination drill", dim));
         render_row(frame, area, spans);
         return;
     };

@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use crate::config::{Config, ErrorModeSerde};
+use crate::engine::filter::{FocusRule, FOCUS_PATTERNS, MIN_DRILL_WORDS};
 use crate::engine::{LetterFilter, LetterScheduler, WordGenerator};
 use crate::metrics::KeyStats;
 use crate::persistence::{today_date_string, SavedKeyStats, SavedLessonResult, SavedStats};
@@ -38,6 +39,28 @@ pub struct LessonResult {
 pub fn lesson_score(wpm: f64, accuracy: f64) -> f64 {
     let acc_ratio = (accuracy / 100.0).clamp(0.0, 1.0);
     (wpm * acc_ratio * acc_ratio * 100.0).round()
+}
+
+/// The `FOCUS_PATTERNS` entries a given unlocked alphabet can actually
+/// drill: every letter of the pattern unlocked, and at least
+/// `MIN_DRILL_WORDS` distinct real words behind it.
+///
+/// Both gates are needed. The letters test is cheap and rejects most
+/// patterns early in the curriculum; the word count then rules out the
+/// ones that are spellable in principle but have no pool behind them, so
+/// a selectable drill is never a single word repeated for a whole lesson.
+///
+/// A free function rather than a method because `App::new_with_state`
+/// needs it before there is an `App` to call it on.
+fn compute_available_patterns(generator: &WordGenerator, active_keys: &[char]) -> Vec<FocusRule> {
+    let allowed: HashSet<char> = active_keys.iter().copied().collect();
+    let dict = generator.dictionary();
+    FOCUS_PATTERNS
+        .iter()
+        .copied()
+        .filter(|rule| rule.letters().iter().all(|c| allowed.contains(c)))
+        .filter(|rule| dict.has_enough_matches(rule, &allowed, MIN_DRILL_WORDS))
+        .collect()
 }
 
 pub struct App {
@@ -103,10 +126,38 @@ pub struct App {
     /// confidence (keybr's `alphabetSize`, in [0.0, 1.0]). Mirrored onto
     /// `scheduler.alphabet_size` so the next scheduler update applies it.
     pub alphabet_size: f64,
-    /// User-pinned focus letter (keybr's manual lesson focus). Overrides
-    /// the scheduler's auto pick at generation time only — scheduler
-    /// logic, stats recording, and unlock progression are untouched.
-    pub manual_focus: Option<char>,
+    /// User-pinned focus rule (keybr's manual lesson focus, widened to
+    /// cover combination drills). Overrides the scheduler's auto pick at
+    /// generation time only: scheduler logic, stats recording, and unlock
+    /// progression are untouched.
+    ///
+    /// One field holds both kinds of pin on purpose. The settings screen
+    /// offers a letter row and a pattern row, and they write here, so a
+    /// letter pin and a pattern pin cannot coexist by construction rather
+    /// than by convention.
+    pub manual_focus: Option<FocusRule>,
+    /// The combination drills the settings pattern row may offer right
+    /// now, derived from the unlocked alphabet.
+    ///
+    /// Stored rather than computed on demand because deriving it scans the
+    /// whole wordlist once per drill, and the settings screen and the
+    /// taria tree would otherwise do that on every frame. It is also the
+    /// one definition of "available", read by `effective_focus`, the
+    /// settings row, and the pattern cycler alike, so the UI cannot show a
+    /// drill the generator is not running.
+    ///
+    /// Private so `refresh_available_patterns` is the only writer, and
+    /// read through `available_patterns()`. Refresh after anything that
+    /// can change `scheduler.active_keys`, which in practice means after
+    /// every `scheduler.update` (see `run_scheduler_update`) and after
+    /// restoring saved letters at construction.
+    available_patterns: Vec<FocusRule>,
+    /// `scheduler.active_keys.len()` when `available_patterns` was last
+    /// computed, so debug builds can catch a stale list. Not a general
+    /// cache key: active keys only ever grow at runtime, so the length
+    /// pins the alphabet down well enough to fail a test that forgets to
+    /// refresh.
+    available_patterns_for_keys: usize,
 
     // --- Daily-goal tracker (persisted) ---
     /// Wall-clock seconds practiced today. Display as minutes; storing in
@@ -213,12 +264,21 @@ impl App {
         // Initial scheduler update to set focused key
         scheduler.update(&stats, target_cpm);
 
-        let filter = LetterFilter::new(&scheduler.active_keys, scheduler.focused_key);
+        let filter = LetterFilter::new(
+            &scheduler.active_keys,
+            scheduler.focused_key.map(FocusRule::Key),
+        );
         let mut generator = WordGenerator::new();
         // Default to the natural-words blend on; main.rs overrides this
         // from the loaded config immediately after construction.
         generator.set_natural_words(true);
         let text = generator.generate_fragment(&filter, 100);
+
+        // Seed the drill list for the alphabet we just restored. `main`
+        // re-runs the scheduler with the configured `alphabet_size` and
+        // refreshes this again before anything reads it.
+        let available_patterns = compute_available_patterns(&generator, &scheduler.active_keys);
+        let available_patterns_for_keys = scheduler.active_keys.len();
 
         App {
             running: true,
@@ -247,6 +307,8 @@ impl App {
             daily_goal_minutes: 30,
             alphabet_size: 0.0,
             manual_focus: None,
+            available_patterns,
+            available_patterns_for_keys,
             today_seconds_practiced,
             today_date,
             menu_selection: 0,
@@ -274,15 +336,71 @@ impl App {
         }
     }
 
-    /// The focus letter the generator should force into every word:
-    /// the manual pin when set and still unlocked, otherwise the
-    /// scheduler's auto pick. The unlock guard makes a stale pin (e.g.
-    /// a hand-edited config naming a locked letter) fall back to auto
-    /// silently instead of forcing an unpracticed key.
-    pub fn effective_focus(&self) -> Option<char> {
+    /// The rule the generator should force onto every word: the manual
+    /// pin when set and still reachable, otherwise the scheduler's auto
+    /// pick. A stale pin (e.g. a hand-edited config naming a locked
+    /// letter, or a pattern whose letters were force-unlocked by an
+    /// `alphabet_size` the user has since lowered) falls back to auto
+    /// silently instead of forcing unpracticed keys.
+    ///
+    /// The two pin kinds are guarded differently because they mean
+    /// different things. A letter pin needs only its key unlocked, which
+    /// is the cheap membership test it has always been. A pattern pin must
+    /// be in `available_patterns`, the exact list the settings row offered
+    /// it from: anything weaker would let the UI report an active drill
+    /// while the generator quietly emitted unfocused words.
+    ///
+    /// This runs on every render, and both guards are a slice scan over a
+    /// handful of entries. Nothing here touches the dictionary.
+    pub fn effective_focus(&self) -> Option<FocusRule> {
         self.manual_focus
-            .filter(|c| self.scheduler.active_keys.contains(c))
-            .or(self.scheduler.focused_key)
+            .filter(|rule| match rule {
+                FocusRule::Key(_) => self.focus_letters_unlocked(rule),
+                FocusRule::Contains(_) | FocusRule::Suffix(_) => {
+                    self.available_patterns().contains(rule)
+                }
+            })
+            .or(self.scheduler.focused_key.map(FocusRule::Key))
+    }
+
+    /// True when every letter a rule needs is currently unlocked.
+    fn focus_letters_unlocked(&self, rule: &FocusRule) -> bool {
+        rule.letters()
+            .iter()
+            .all(|c| self.scheduler.active_keys.contains(c))
+    }
+
+    /// The combination drills the settings screen may offer right now.
+    ///
+    /// Read-only view of the stored list. Views call this; nothing here
+    /// computes, so a render never scans the wordlist.
+    pub fn available_patterns(&self) -> &[FocusRule] {
+        debug_assert_eq!(
+            self.available_patterns_for_keys,
+            self.scheduler.active_keys.len(),
+            "available_patterns is stale: refresh_available_patterns must follow \
+             every change to scheduler.active_keys",
+        );
+        &self.available_patterns
+    }
+
+    /// Recompute the stored drill list for the current unlocked alphabet.
+    ///
+    /// Call after anything that can change `scheduler.active_keys`.
+    pub fn refresh_available_patterns(&mut self) {
+        self.available_patterns =
+            compute_available_patterns(&self.generator, &self.scheduler.active_keys);
+        self.available_patterns_for_keys = self.scheduler.active_keys.len();
+    }
+
+    /// Run the letter scheduler and refresh whatever is derived from the
+    /// alphabet it just changed.
+    ///
+    /// The only way production code steps the scheduler on an `App`, so
+    /// the drill list cannot be left behind by a new caller.
+    pub fn run_scheduler_update(&mut self) {
+        self.scheduler.update(&self.per_key_stats, self.target_cpm);
+        self.refresh_available_patterns();
     }
 
     /// True when `effective_focus()` is the user's manual pin rather than
@@ -294,24 +412,33 @@ impl App {
         self.manual_focus.is_some() && self.effective_focus() == self.manual_focus
     }
 
-    /// Normalize and apply a `focus_letter` pin loaded from config.
+    /// Resolve the two config pin keys into the single `manual_focus`
+    /// field, applying the documented precedence: a usable
+    /// `focus_pattern` wins, else `focus_letter`, else Auto.
     ///
-    /// Lowercases first because the config is a plain TOML file: a
-    /// hand-edited `"R"` should pin 'r', not silently misbehave. Then
-    /// drops the pin unless the letter is currently unlocked: the
-    /// Settings row label reads `manual_focus` directly, so keeping a
-    /// locked letter here would display "pinned" while lessons behave as
-    /// Auto, and the next config save would persist that lie.
-    /// `effective_focus` keeps its own unlock guard as defense in depth
-    /// for pins set at runtime.
+    /// Both are validated and silently dropped when unusable, rather than
+    /// reported as an error. The Settings rows read `manual_focus`
+    /// directly, so keeping an unusable pin here would display "pinned"
+    /// while lessons behave as Auto, and the next config save would
+    /// persist that lie. A pattern must still be in `available_patterns`
+    /// (letters unlocked *and* words behind it); a letter is lowercased
+    /// first, because the config is a plain TOML file and a hand-edited
+    /// `"R"` should pin 'r' rather than silently misbehave, then dropped
+    /// unless the letter is unlocked. `effective_focus` keeps its own
+    /// guard as defense in depth for pins set at runtime.
     ///
-    /// Callers must run `scheduler.update` with the final `alphabet_size`
-    /// applied *before* calling this, so letters force-unlocked by that
-    /// setting count as valid pins.
-    pub fn set_manual_focus_from_config(&mut self, pin: Option<char>) {
-        self.manual_focus = pin
-            .map(|c| c.to_ascii_lowercase())
-            .filter(|c| self.scheduler.active_keys.contains(c));
+    /// Callers must run `run_scheduler_update` with the final
+    /// `alphabet_size` applied *before* calling this, so letters
+    /// force-unlocked by that setting count as valid pins and the stored
+    /// drill list this validates against is current.
+    pub fn set_manual_focus_from_config(&mut self, pattern: Option<&str>, letter: Option<char>) {
+        let from_pattern = pattern
+            .and_then(FocusRule::from_config)
+            .filter(|rule| self.available_patterns().contains(rule));
+        let from_letter = letter
+            .map(|c| FocusRule::Key(c.to_ascii_lowercase()))
+            .filter(|rule| self.focus_letters_unlocked(rule));
+        self.manual_focus = from_pattern.or(from_letter);
     }
 
     /// Target WPM for display (WPM = CPM / 5).
@@ -401,8 +528,9 @@ impl App {
             stats.finish_lesson();
         }
 
-        // Update scheduler with current stats
-        self.scheduler.update(&self.per_key_stats, self.target_cpm);
+        // Update scheduler with current stats (and the drill list, which
+        // a newly unlocked letter can widen).
+        self.run_scheduler_update();
 
         let newly_unlocked = if self.scheduler.active_keys.len() > old_count {
             Some(*self.scheduler.active_keys.last().unwrap())
@@ -500,6 +628,16 @@ impl App {
 
     /// Convert current app settings to a `Config` for persistence.
     pub fn to_config(&self) -> Config {
+        // One pin, two keys: a letter goes to `focus_letter` exactly as
+        // it always did, a pattern to `focus_pattern`. Whichever is unset
+        // is omitted from the file, so a user who never opens the pattern
+        // row writes byte-identical config to before.
+        let (focus_letter, focus_pattern) = match self.manual_focus {
+            Some(FocusRule::Key(c)) => (Some(c), None),
+            Some(rule) => (None, Some(rule.config_value())),
+            None => (None, None),
+        };
+
         Config {
             target_wpm: self.target_wpm(),
             error_mode: match self.error_mode {
@@ -510,7 +648,8 @@ impl App {
             natural_words: self.natural_words,
             daily_goal_minutes: self.daily_goal_minutes,
             alphabet_size: self.alphabet_size,
-            focus_letter: self.manual_focus,
+            focus_letter,
+            focus_pattern,
         }
     }
 }
@@ -538,6 +677,7 @@ impl Default for App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::scheduler::UNLOCK_ORDER;
 
     #[test]
     fn accuracy_is_100_with_no_errors() {
@@ -583,12 +723,45 @@ mod tests {
         assert!((app.target_cpm - 175.0).abs() < f64::EPSILON);
     }
 
+    /// Unlock the whole alphabet, which is what makes every combination
+    /// drill reachable. Mirrors what the scheduler does over a long
+    /// profile, without having to type thousands of characters.
+    ///
+    /// Writing `active_keys` by hand bypasses `run_scheduler_update`, so
+    /// the derived drill list has to be refreshed the same way the
+    /// scheduler path does it.
+    fn unlock_all_letters(app: &mut App) {
+        set_active_keys(app, ('a'..='z').collect());
+    }
+
+    /// Replace the unlocked alphabet and refresh what is derived from it.
+    /// The only way these tests should write `active_keys`.
+    fn set_active_keys(app: &mut App, keys: Vec<char>) {
+        app.scheduler.active_keys = keys;
+        app.refresh_available_patterns();
+    }
+
+    /// How many dictionary words satisfy `rule` under `allowed`.
+    ///
+    /// `has_enough_matches` answers a threshold, not a count, so raise
+    /// the threshold until it says no. Tests use this to state a pool
+    /// size as a number, which a reader can check against the wordlist,
+    /// instead of re-deriving the gate's own predicate.
+    fn count_drill_words(app: &App, rule: &FocusRule, allowed: &HashSet<char>) -> usize {
+        let dict = app.generator.dictionary();
+        let mut found = 0;
+        while dict.has_enough_matches(rule, allowed, found + 1) {
+            found += 1;
+        }
+        found
+    }
+
     #[test]
     fn effective_focus_prefers_unlocked_pin() {
         let mut app = App::new();
         // 'r' is one of the six starter letters, unlocked from lesson one.
-        app.manual_focus = Some('r');
-        assert_eq!(app.effective_focus(), Some('r'));
+        app.manual_focus = Some(FocusRule::Key('r'));
+        assert_eq!(app.effective_focus(), Some(FocusRule::Key('r')));
     }
 
     #[test]
@@ -597,22 +770,267 @@ mod tests {
         // 'z' is locked on a fresh profile; the stale pin must yield to
         // the scheduler's auto pick.
         assert!(!app.scheduler.active_keys.contains(&'z'));
-        app.manual_focus = Some('z');
+        app.manual_focus = Some(FocusRule::Key('z'));
         assert!(app.scheduler.focused_key.is_some());
-        assert_eq!(app.effective_focus(), app.scheduler.focused_key);
+        assert_eq!(
+            app.effective_focus(),
+            app.scheduler.focused_key.map(FocusRule::Key)
+        );
     }
 
     #[test]
     fn effective_focus_is_auto_pick_when_unpinned() {
         let app = App::new();
         assert_eq!(app.manual_focus, None);
-        assert_eq!(app.effective_focus(), app.scheduler.focused_key);
+        assert_eq!(
+            app.effective_focus(),
+            app.scheduler.focused_key.map(FocusRule::Key)
+        );
+    }
+
+    #[test]
+    fn effective_focus_keeps_a_pattern_whose_letters_are_all_unlocked() {
+        let mut app = App::new();
+        unlock_all_letters(&mut app);
+        app.manual_focus = Some(FocusRule::Contains("cr"));
+        assert_eq!(app.effective_focus(), Some(FocusRule::Contains("cr")));
+        assert!(app.focus_is_pinned());
+    }
+
+    #[test]
+    fn effective_focus_drops_a_pattern_with_a_locked_letter() {
+        let mut app = App::new();
+        // Starter alphabet: 'c' is locked, so "cr" cannot be drilled and
+        // must fall back to the scheduler's auto pick rather than force
+        // an unpracticed key into every word.
+        assert!(!app.scheduler.active_keys.contains(&'c'));
+        app.manual_focus = Some(FocusRule::Contains("cr"));
+        assert_eq!(
+            app.effective_focus(),
+            app.scheduler.focused_key.map(FocusRule::Key)
+        );
+        assert!(!app.focus_is_pinned());
+
+        // Every letter of "-tion" unlocked except one is still a drop.
+        unlock_all_letters(&mut app);
+        set_active_keys(&mut app, ('a'..='z').filter(|&c| c != 'o').collect());
+        app.manual_focus = Some(FocusRule::Suffix("tion"));
+        assert!(!app.focus_is_pinned());
+    }
+
+    #[test]
+    fn available_patterns_is_empty_on_a_fresh_profile() {
+        // The six starters are e,n,i,a,r,l. The only drill they spell at
+        // all is "-er", and the wordlist has three of those, so the row
+        // opens with nothing. Combination drills are the second half of
+        // the feature: they belong to a profile past the basics, not to
+        // one that has never finished a lesson.
+        let app = App::new();
+        assert!(
+            app.available_patterns().is_empty(),
+            "a fresh profile must offer no drill, got {:?}",
+            app.available_patterns()
+        );
+    }
+
+    #[test]
+    fn the_first_drill_appears_when_t_unlocks() {
+        // Seventh letter in the unlock order is 't', which takes "-er"
+        // from three words to twelve and makes it the first real drill.
+        let mut app = App::new();
+        set_active_keys(&mut app, UNLOCK_ORDER[..7].to_vec());
+        assert_eq!(
+            app.available_patterns(),
+            [FocusRule::Suffix("er")],
+            "the first offer should be -ER alone",
+        );
+    }
+
+    #[test]
+    fn available_patterns_never_offers_a_drill_below_the_word_threshold() {
+        // Four concrete points, two crossings of MIN_DRILL_WORDS, with
+        // the words counted rather than the gate's own predicate
+        // re-derived. Every letter of both rules is unlocked at every
+        // point below, so the word count is the only thing deciding.
+        //
+        // "-er" goes from three words at six letters to twelve when 't'
+        // unlocks. "-tion" goes from five at eight letters to exactly
+        // eight at nine, which pins the boundary itself: a pool of
+        // exactly MIN_DRILL_WORDS is offered rather than withheld.
+        let mut app = App::new();
+        for (n, rule, words, offered) in [
+            (6, FocusRule::Suffix("er"), 3, false),
+            (7, FocusRule::Suffix("er"), 12, true),
+            (8, FocusRule::Suffix("tion"), 5, false),
+            (9, FocusRule::Suffix("tion"), 8, true),
+        ] {
+            set_active_keys(&mut app, UNLOCK_ORDER[..n].to_vec());
+            let allowed: HashSet<char> = UNLOCK_ORDER[..n].iter().copied().collect();
+            assert!(
+                rule.letters().iter().all(|c| allowed.contains(c)),
+                "{} is unspellable at {n} letters, which is not the case under test",
+                rule.config_value(),
+            );
+            assert_eq!(
+                count_drill_words(&app, &rule, &allowed),
+                words,
+                "the wordlist moved under {} at {n} letters",
+                rule.config_value(),
+            );
+            assert_eq!(
+                app.available_patterns().contains(&rule),
+                offered,
+                "{} has {words} words at {n} letters, threshold is {MIN_DRILL_WORDS}",
+                rule.config_value(),
+            );
+        }
+    }
+
+    #[test]
+    fn a_single_word_drill_is_not_offered() {
+        // Ten letters spell exactly one "-ous" word, "serious". A lesson
+        // pinned to it would print that word forty times, so the row must
+        // not offer it, even though a one-match gate would.
+        let mut app = App::new();
+        set_active_keys(&mut app, UNLOCK_ORDER[..10].to_vec());
+        let allowed: HashSet<char> = UNLOCK_ORDER[..10].iter().copied().collect();
+        let rule = FocusRule::Suffix("ous");
+        let dict = app.generator.dictionary();
+        assert!(
+            dict.has_enough_matches(&rule, &allowed, 1),
+            "the one word is there",
+        );
+        assert!(
+            !app.available_patterns().contains(&rule),
+            "one word is not a drill",
+        );
+    }
+
+    #[test]
+    fn available_patterns_is_empty_when_nothing_is_spellable() {
+        // Four letters reach no drill at all. This is the state the
+        // settings row reports as "None yet" rather than an empty box.
+        let mut app = App::new();
+        set_active_keys(&mut app, vec!['e', 'n', 'i', 'a']);
+        assert!(app.available_patterns().is_empty());
+    }
+
+    #[test]
+    fn available_patterns_grows_as_letters_unlock() {
+        let mut app = App::new();
+        let fresh = app.available_patterns().len();
+        unlock_all_letters(&mut app);
+        let full = app.available_patterns();
+        assert!(
+            full.len() > fresh,
+            "unlocking the alphabet must open up drills"
+        );
+        // With every letter available the whole preset list is reachable.
+        assert_eq!(full.len(), FOCUS_PATTERNS.len());
+    }
+
+    #[test]
+    fn available_patterns_never_offers_a_drill_with_no_words() {
+        let mut app = App::new();
+        unlock_all_letters(&mut app);
+        // 'g' gone: "-ing" and "gr" are unspellable, so neither may be
+        // offered. Losing one letter must withdraw exactly the drills
+        // that spell it and leave the other fourteen alone, so this is
+        // an exact set rather than a scan that re-derives the gate.
+        set_active_keys(&mut app, ('a'..='z').filter(|&c| c != 'g').collect());
+        let patterns = app.available_patterns().to_vec();
+        let expected: Vec<FocusRule> = FOCUS_PATTERNS
+            .iter()
+            .copied()
+            .filter(|r| !r.letters().contains(&'g'))
+            .collect();
+        assert_eq!(patterns, expected);
+        assert_eq!(patterns.len(), FOCUS_PATTERNS.len() - 2);
+    }
+
+    #[test]
+    fn effective_focus_drops_a_pattern_that_is_no_longer_on_offer() {
+        // The divergence this guard exists for: every letter of "-ous" is
+        // unlocked at ten letters, but the wordlist holds exactly one such
+        // word there, so the drill is not on offer. The letters test alone
+        // would keep the pin and let the UI announce a drill the generator
+        // is not running.
+        let mut app = App::new();
+        unlock_all_letters(&mut app);
+        let rule = FocusRule::Suffix("ous");
+        app.manual_focus = Some(rule);
+        assert_eq!(app.effective_focus(), Some(rule));
+        assert!(app.focus_is_pinned());
+
+        set_active_keys(&mut app, UNLOCK_ORDER[..10].to_vec());
+        assert!(
+            rule.letters()
+                .iter()
+                .all(|c| app.scheduler.active_keys.contains(c)),
+            "the letters are all unlocked, which is the point",
+        );
+        assert!(!app.available_patterns().contains(&rule));
+        assert_eq!(
+            app.effective_focus(),
+            app.scheduler.focused_key.map(FocusRule::Key),
+            "an unavailable drill must fall back to the auto pick",
+        );
+        assert!(!app.focus_is_pinned());
+    }
+
+    #[test]
+    fn effective_focus_keeps_a_letter_pin_on_the_letters_test_alone() {
+        // The letter path must not pick up the drill gate: 'r' is
+        // unlocked from lesson one and stays pinned on a fresh profile
+        // that offers no drill at all.
+        let mut app = App::new();
+        assert!(app.available_patterns().is_empty());
+        app.manual_focus = Some(FocusRule::Key('r'));
+        assert_eq!(app.effective_focus(), Some(FocusRule::Key('r')));
+        assert!(app.focus_is_pinned());
+    }
+
+    #[test]
+    fn the_drill_list_is_refreshed_when_the_scheduler_runs() {
+        // `alphabet_size` does not move `active_keys` by itself; the
+        // letters it forces are added by the next scheduler run, and the
+        // stored drill list must follow them there.
+        let mut app = App::new();
+        assert!(app.available_patterns().is_empty());
+
+        app.alphabet_size = 1.0;
+        app.scheduler.alphabet_size = 1.0;
+        assert!(
+            app.available_patterns().is_empty(),
+            "the setting alone unlocks nothing",
+        );
+
+        app.run_scheduler_update();
+        assert_eq!(app.scheduler.active_keys.len(), UNLOCK_ORDER.len());
+        assert_eq!(
+            app.available_patterns().len(),
+            FOCUS_PATTERNS.len(),
+            "the whole alphabet must open every drill",
+        );
+    }
+
+    #[test]
+    fn finishing_a_lesson_refreshes_the_drill_list() {
+        // `finish_lesson` runs the scheduler, which can unlock a letter.
+        // The debug assertion inside `available_patterns` catches a list
+        // left behind; this pins the refresh down in release builds too.
+        let mut app = App::new();
+        app.alphabet_size = 1.0;
+        app.scheduler.alphabet_size = 1.0;
+        app.generated_text = "en".to_string();
+        app.finish_lesson();
+        assert_eq!(app.available_patterns().len(), FOCUS_PATTERNS.len());
     }
 
     #[test]
     fn pinned_letter_appears_in_every_generated_word() {
         let mut app = App::new();
-        app.manual_focus = Some('r');
+        app.manual_focus = Some(FocusRule::Key('r'));
         app.start_next_lesson();
         assert!(!app.generated_text.is_empty());
         for word in app.generated_text.split_whitespace() {
@@ -626,12 +1044,100 @@ mod tests {
     }
 
     #[test]
+    fn pinned_pattern_is_satisfied_by_every_generated_word() {
+        for rule in [FocusRule::Contains("cr"), FocusRule::Suffix("ing")] {
+            let mut app = App::new();
+            unlock_all_letters(&mut app);
+            assert!(app.available_patterns().contains(&rule));
+            app.manual_focus = Some(rule);
+            app.start_next_lesson();
+            assert!(!app.generated_text.is_empty());
+            for word in app.generated_text.split_whitespace() {
+                assert!(
+                    rule.matches(word),
+                    "pinned {} not satisfied by word '{}' in: {}",
+                    rule.config_value(),
+                    word,
+                    app.generated_text
+                );
+            }
+        }
+    }
+
+    #[test]
     fn to_config_carries_manual_focus() {
         let mut app = App::new();
-        app.manual_focus = Some('r');
+        app.manual_focus = Some(FocusRule::Key('r'));
         assert_eq!(app.to_config().focus_letter, Some('r'));
+        assert_eq!(app.to_config().focus_pattern, None);
         app.manual_focus = None;
         assert_eq!(app.to_config().focus_letter, None);
+        assert_eq!(app.to_config().focus_pattern, None);
+    }
+
+    #[test]
+    fn to_config_writes_a_pattern_to_its_own_key() {
+        let mut app = App::new();
+        app.manual_focus = Some(FocusRule::Suffix("tion"));
+        let cfg = app.to_config();
+        assert_eq!(cfg.focus_pattern, Some("-tion".to_string()));
+        assert_eq!(
+            cfg.focus_letter, None,
+            "a pattern pin must not also write a letter"
+        );
+
+        app.manual_focus = Some(FocusRule::Contains("cr"));
+        let cfg = app.to_config();
+        assert_eq!(cfg.focus_pattern, Some("cr".to_string()));
+        assert_eq!(cfg.focus_letter, None);
+    }
+
+    #[test]
+    fn config_round_trips_both_pin_kinds() {
+        // Letter out, letter back.
+        let mut app = App::new();
+        app.manual_focus = Some(FocusRule::Key('r'));
+        let cfg = app.to_config();
+        let mut reloaded = App::new();
+        reloaded.set_manual_focus_from_config(cfg.focus_pattern.as_deref(), cfg.focus_letter);
+        assert_eq!(reloaded.manual_focus, Some(FocusRule::Key('r')));
+
+        // Pattern out, pattern back.
+        unlock_all_letters(&mut app);
+        app.manual_focus = Some(FocusRule::Suffix("tion"));
+        let cfg = app.to_config();
+        let mut reloaded = App::new();
+        unlock_all_letters(&mut reloaded);
+        reloaded.set_manual_focus_from_config(cfg.focus_pattern.as_deref(), cfg.focus_letter);
+        assert_eq!(reloaded.manual_focus, Some(FocusRule::Suffix("tion")));
+    }
+
+    #[test]
+    fn config_pattern_outranks_config_letter() {
+        // A file carrying both (hand-edited, or written by a build that
+        // stored them separately) resolves to exactly one pin.
+        let mut app = App::new();
+        unlock_all_letters(&mut app);
+        app.set_manual_focus_from_config(Some("cr"), Some('r'));
+        assert_eq!(app.manual_focus, Some(FocusRule::Contains("cr")));
+    }
+
+    #[test]
+    fn config_falls_back_to_the_letter_when_the_pattern_is_unusable() {
+        let mut app = App::new();
+        // Starter alphabet: "cr" is not available, 'r' is unlocked.
+        app.set_manual_focus_from_config(Some("cr"), Some('r'));
+        assert_eq!(app.manual_focus, Some(FocusRule::Key('r')));
+
+        // Junk in the pattern key is a dropped pin, not an error.
+        app.set_manual_focus_from_config(Some("banana"), Some('r'));
+        assert_eq!(app.manual_focus, Some(FocusRule::Key('r')));
+
+        // Neither usable: Auto.
+        app.set_manual_focus_from_config(Some("banana"), Some('z'));
+        assert_eq!(app.manual_focus, None);
+        app.set_manual_focus_from_config(None, None);
+        assert_eq!(app.manual_focus, None);
     }
 
     #[test]
@@ -639,8 +1145,8 @@ mod tests {
         let mut app = App::new();
         // A hand-edited config may hold "R"; 'r' is a starter letter, so
         // the lowered pin is valid and must survive.
-        app.set_manual_focus_from_config(Some('R'));
-        assert_eq!(app.manual_focus, Some('r'));
+        app.set_manual_focus_from_config(None, Some('R'));
+        assert_eq!(app.manual_focus, Some(FocusRule::Key('r')));
     }
 
     #[test]
@@ -649,7 +1155,7 @@ mod tests {
         // 'z' is locked on a fresh profile — the pin must be dropped so
         // the Settings label doesn't claim a pin that behaves as Auto.
         assert!(!app.scheduler.active_keys.contains(&'z'));
-        app.set_manual_focus_from_config(Some('z'));
+        app.set_manual_focus_from_config(None, Some('z'));
         assert_eq!(app.manual_focus, None);
     }
 
@@ -657,16 +1163,24 @@ mod tests {
     fn config_pin_on_forced_letter_survives_scheduler_rerun() {
         let mut app = App::new();
         // Mirror the real main.rs load order: mirror the configured
-        // alphabet_size onto the scheduler, re-run the scheduler so the
-        // force-unlocked letters join `active_keys`, THEN validate the
-        // pin. alphabet_size 0.05 forces one extra letter: 't'.
+        // alphabet_size onto the scheduler, call `run_scheduler_update`
+        // so the force-unlocked letters join `active_keys`, THEN validate
+        // the pin. alphabet_size 0.05 forces one extra letter: 't'.
+        //
+        // `run_scheduler_update` rather than a bare `scheduler.update` is
+        // what main.rs does, and it is also what keeps the derived drill
+        // list in step with the alphabet the scheduler just widened.
         app.alphabet_size = 0.05;
         app.scheduler.alphabet_size = app.alphabet_size;
-        app.scheduler.update(&app.per_key_stats, app.target_cpm);
+        app.run_scheduler_update();
         assert!(app.scheduler.active_keys.contains(&'t'));
+        // Reading the derived list here is the staleness check: with a
+        // bare `scheduler.update` the cache is a letter behind and this
+        // trips the debug_assert in `available_patterns`.
+        let _ = app.available_patterns();
 
-        app.set_manual_focus_from_config(Some('t'));
-        assert_eq!(app.manual_focus, Some('t'));
+        app.set_manual_focus_from_config(None, Some('t'));
+        assert_eq!(app.manual_focus, Some(FocusRule::Key('t')));
     }
 
     #[test]
@@ -675,11 +1189,11 @@ mod tests {
         // No pin: auto focus is never "pinned".
         assert!(!app.focus_is_pinned());
         // Valid pin on an unlocked starter letter.
-        app.manual_focus = Some('r');
+        app.manual_focus = Some(FocusRule::Key('r'));
         assert!(app.focus_is_pinned());
         // Stale pin on a locked letter falls back to auto and must not
         // report as pinned.
-        app.manual_focus = Some('z');
+        app.manual_focus = Some(FocusRule::Key('z'));
         assert!(!app.focus_is_pinned());
     }
 }

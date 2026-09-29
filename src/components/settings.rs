@@ -7,16 +7,57 @@ use ratatui::{
 };
 
 use crate::app::{App, ErrorMode};
+use crate::engine::filter::FocusRule;
 
 /// Settings items the user can navigate between.
-pub const SETTINGS_COUNT: usize = 5;
+pub const SETTINGS_COUNT: usize = 6;
+
+/// Value shown by the "Focus letter" row: the pinned letter, or "Auto"
+/// when the scheduler picks. A pattern pin shares the same field, and
+/// reads as Auto here, so exactly one of the two rows ever shows a value.
+///
+/// `pub(crate)` so the taria tree (`crate::tree`, unix only) publishes the
+/// string the human sees, from one definition.
+pub(crate) fn focus_letter_value(app: &App) -> String {
+    match app.manual_focus {
+        Some(FocusRule::Key(c)) => c.to_ascii_uppercase().to_string(),
+        _ => "Auto".to_string(),
+    }
+}
+
+/// Value shown by the "Focus pattern" row: the pinned drill's label, or
+/// "Off" when no pattern is pinned.
+///
+/// "None yet" replaces "Off" when the unlocked alphabet cannot fill any
+/// drill, which is the normal state of an early profile. An empty box
+/// there would read as a bug rather than as a row with nothing to offer.
+///
+/// A pinned pattern is shown only while it is still on offer, the same
+/// test `App::effective_focus` applies, so this row can never name a
+/// drill the generator is not running. `available_patterns` is stored
+/// state, so both tests are slice scans over a handful of entries.
+pub(crate) fn focus_pattern_value(app: &App) -> String {
+    match app.manual_focus {
+        Some(rule @ (FocusRule::Contains(_) | FocusRule::Suffix(_)))
+            if app.available_patterns().contains(&rule) =>
+        {
+            rule.label()
+        }
+        _ if app.available_patterns().is_empty() => "None yet".to_string(),
+        _ => "Off".to_string(),
+    }
+}
 
 pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let v_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Percentage(30),
-            Constraint::Min(10),
+            // Title + blank + 6 rows + blank + hint = 10 lines, plus a
+            // row of slack. The sixth row used up the slack the old
+            // Min(10) had, and a settings screen that silently clips its
+            // "[Esc] Back to menu" hint is worse than a taller box.
+            Constraint::Min(11),
             Constraint::Percentage(30),
         ])
         .split(area);
@@ -140,13 +181,34 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     } else {
         "  "
     };
-    let focus_label = match app.manual_focus {
-        Some(c) => c.to_ascii_uppercase().to_string(),
-        None => "Auto".to_string(),
-    };
     lines.push(Line::from(vec![
         Span::styled(format!("{}Focus letter        ", focus_marker), focus_style),
-        Span::styled(format!("[  {focus_label}  ]"), focus_style),
+        Span::styled(format!("[  {}  ]", focus_letter_value(app)), focus_style),
+        Span::styled(
+            "     Left/Right to adjust",
+            Style::default().fg(Color::DarkGray),
+        ),
+    ]));
+
+    // Focus pattern (combination drill: a bigram reach or a word ending)
+    let pattern_style = if app.settings_selection == 5 {
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let pattern_marker = if app.settings_selection == 5 {
+        "> "
+    } else {
+        "  "
+    };
+    lines.push(Line::from(vec![
+        Span::styled(
+            format!("{}Focus pattern       ", pattern_marker),
+            pattern_style,
+        ),
+        Span::styled(format!("[  {}  ]", focus_pattern_value(app)), pattern_style),
         Span::styled(
             "     Left/Right to adjust",
             Style::default().fg(Color::DarkGray),

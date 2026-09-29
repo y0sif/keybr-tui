@@ -134,9 +134,11 @@ fn main() -> color_eyre::Result<()> {
     // force-unlocked by alphabet_size are not yet in `active_keys`. This
     // must happen BEFORE the pin normalization below, which drops any pin
     // not in `active_keys` — otherwise a valid pin on a forced letter
-    // would be dropped and erased by the next config save.
-    app.scheduler.update(&app.per_key_stats, app.target_cpm);
-    app.set_manual_focus_from_config(config.focus_letter);
+    // would be dropped and erased by the next config save. It also
+    // refreshes the available drill list, which the pattern pin below is
+    // validated against.
+    app.run_scheduler_update();
+    app.set_manual_focus_from_config(config.focus_pattern.as_deref(), config.focus_letter);
     app.generator.set_natural_words(app.natural_words);
     let rx = setup_event_channel();
 
