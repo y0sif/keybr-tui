@@ -26,8 +26,8 @@ toml = "0.8"
 serde_json = "1"
 directories = "6"
 
-# Only the unix build reads the local UTC offset through `localtime_r`; the
-# `#[cfg(not(unix))]` path in persistence.rs is a pure-Rust stub. crossterm
+# The local UTC offset comes from `localtime_r` on unix and from the Win32
+# time API on Windows (see `local_utc_offset_secs` in persistence.rs). crossterm
 # declares its own libc as optional and unix-gated, so it is not something
 # crossterm hands us on Windows — gate ours the same way rather than making
 # every target depend on libc directly.
@@ -39,6 +39,12 @@ directories = "6"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 taria-ratatui = "0.2"
+
+# Windows reads the offset via SystemTimeToTzSpecificLocalTime. windows-sys
+# 0.61 is already in the Windows lock tree (dirs-sys, anstyle), so this adds
+# features, not a new crate version.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Time"] }
 
 [profile.release]
 lto = true
