@@ -33,7 +33,9 @@ fn default_lesson_history() -> Vec<SavedLessonResult> {
 /// The daily goal is a "did I practice today" counter, so it has to roll over
 /// at local midnight, not UTC midnight — otherwise anyone west of UTC sees
 /// evening practice counted toward tomorrow. The offset comes from libc's
-/// `localtime_r` (honours `TZ`); non-unix targets fall back to UTC.
+/// `localtime_r` (honours `TZ`) on unix and from the active Windows time zone
+/// on Windows; any other target, including the few unix ones whose libc `tm`
+/// has no `tm_gmtoff`, falls back to UTC.
 ///
 /// Uses Howard Hinnant's "civil_from_days" algorithm (public domain) to map
 /// days-since-1970-01-01 → (year, month, day). Avoids pulling in chrono.
@@ -67,7 +69,21 @@ pub fn unix_now_secs() -> Option<i64> {
 }
 
 /// Seconds east of UTC for the local timezone at the given Unix time.
-#[cfg(unix)]
+///
+/// libc's `struct tm` has no `tm_gmtoff` on the unix targets excluded here, so
+/// they take the UTC fallback below like any other unsupported target. Keep
+/// this predicate in sync with that stub and with the `local_offset` tests.
+#[cfg(all(
+    unix,
+    not(any(
+        target_os = "solaris",
+        target_os = "illumos",
+        target_os = "aix",
+        target_os = "vxworks",
+        target_os = "qurt",
+        target_env = "newlib"
+    ))
+))]
 fn local_utc_offset_secs(secs: i64) -> i64 {
     let t: libc::time_t = secs as libc::time_t;
     // SAFETY: `tm` is a plain C struct; localtime_r only writes into the
@@ -79,7 +95,84 @@ fn local_utc_offset_secs(secs: i64) -> i64 {
     tm.tm_gmtoff as i64
 }
 
-#[cfg(not(unix))]
+/// Seconds east of UTC for the active Windows time zone at the given Unix time.
+///
+/// Win32 has no direct "offset at instant" call, so convert the instant to
+/// local wall time with `SystemTimeToTzSpecificLocalTime` and diff the two as
+/// FILETIME ticks. With the active zone that call applies the zone's current
+/// DST rule to the instant's date, not historical per-year rules; callers only
+/// pass "now", where the current rule is the right one.
+#[cfg(windows)]
+fn local_utc_offset_secs(secs: i64) -> i64 {
+    offset_with_tz(secs, None)
+}
+
+/// Seconds east of UTC at the given Unix time in `tz`, or in the active zone
+/// when `tz` is `None`. Split out so tests can pin a zone.
+#[cfg(windows)]
+fn offset_with_tz(
+    secs: i64,
+    tz: Option<&windows_sys::Win32::System::Time::TIME_ZONE_INFORMATION>,
+) -> i64 {
+    use windows_sys::Win32::Foundation::{FILETIME, SYSTEMTIME};
+    use windows_sys::Win32::System::Time::{
+        FileTimeToSystemTime, SystemTimeToFileTime, SystemTimeToTzSpecificLocalTime,
+    };
+
+    // Seconds from 1601-01-01 (FILETIME epoch) to 1970-01-01 (Unix epoch).
+    const EPOCH_DIFF_SECS: i64 = 11_644_473_600;
+    // FILETIME counts 100-nanosecond intervals.
+    const TICKS_PER_SEC: i64 = 10_000_000;
+
+    let Some(ticks) = secs
+        .checked_add(EPOCH_DIFF_SECS)
+        .and_then(|s| s.checked_mul(TICKS_PER_SEC))
+        .filter(|t| *t >= 0)
+    else {
+        return 0;
+    };
+    // A null zone pointer selects the currently active time zone.
+    let tz_ptr = tz.map_or(std::ptr::null(), |t| t as *const _);
+    let utc_ft = FILETIME {
+        dwLowDateTime: ticks as u32,
+        dwHighDateTime: (ticks >> 32) as u32,
+    };
+    // SAFETY: SYSTEMTIME and FILETIME are plain C structs (all-zero is valid).
+    // Each call only reads its const pointers and writes its out-pointer; the
+    // time pointers all point at live locals. `tz_ptr` is either null, which
+    // the Win32 docs define as "the currently active time zone", or derived
+    // from a reference that outlives this call.
+    unsafe {
+        let mut utc_st: SYSTEMTIME = std::mem::zeroed();
+        let mut local_st: SYSTEMTIME = std::mem::zeroed();
+        let mut local_ft: FILETIME = std::mem::zeroed();
+        if FileTimeToSystemTime(&utc_ft, &mut utc_st) == 0
+            || SystemTimeToTzSpecificLocalTime(tz_ptr, &utc_st, &mut local_st) == 0
+            || SystemTimeToFileTime(&local_st, &mut local_ft) == 0
+        {
+            return 0;
+        }
+        let local_ticks = ((local_ft.dwHighDateTime as i64) << 32) | local_ft.dwLowDateTime as i64;
+        (local_ticks - ticks) / TICKS_PER_SEC
+    }
+}
+
+/// UTC fallback for targets with no supported offset source: neither Windows
+/// nor a unix whose libc `tm` carries `tm_gmtoff`.
+#[cfg(not(any(
+    windows,
+    all(
+        unix,
+        not(any(
+            target_os = "solaris",
+            target_os = "illumos",
+            target_os = "aix",
+            target_os = "vxworks",
+            target_os = "qurt",
+            target_env = "newlib"
+        ))
+    )
+)))]
 fn local_utc_offset_secs(_secs: i64) -> i64 {
     0
 }
@@ -523,47 +616,84 @@ mod tests {
         assert_eq!(bytes[7], b'-');
     }
 
-    /// The load-bearing test for the local-timezone fix.
-    ///
-    /// At *any* instant the local calendar date at UTC+14 and at UTC-12
-    /// differ, because the two zones are 26 hours apart and a day is only 24 —
-    /// so this needs no pinned wall clock to be deterministic. Drop the
-    /// `+ local_utc_offset_secs(secs)` term from `today_date_string()` and both
-    /// calls collapse to the same UTC date, failing the assert.
-    ///
-    /// POSIX `TZ` offsets are sign-inverted relative to ISO: `UTC-14` is 14h
-    /// EAST of UTC (+1400) and `UTC+12` is 12h WEST (-1200). POSIX offset
-    /// strings, not zone names, so no tzdata install is required.
-    #[cfg(unix)]
-    #[test]
-    fn today_date_string_uses_local_timezone() {
-        let east = {
-            let _tz = TzGuard::set("UTC-14");
-            today_date_string()
-        };
-        let west = {
-            let _tz = TzGuard::set("UTC+12");
-            today_date_string()
-        };
-        assert_ne!(
-            east, west,
-            "today_date_string() returned {east} at UTC+14 and {west} at UTC-12 — \
-             zones 26h apart can never share a calendar date, so the local offset \
-             is being ignored"
-        );
-    }
+    // These assert real non-zero offsets, so they only run where
+    // `local_utc_offset_secs` reads `tm_gmtoff`; same predicate as there.
+    #[cfg(all(
+        unix,
+        not(any(
+            target_os = "solaris",
+            target_os = "illumos",
+            target_os = "aix",
+            target_os = "vxworks",
+            target_os = "qurt",
+            target_env = "newlib"
+        ))
+    ))]
+    mod local_offset {
+        use super::*;
 
-    #[cfg(unix)]
-    #[test]
-    fn local_offset_and_date_for_pinned_instant() {
-        // Deterministic value check to complement the not-equal test above.
-        // 2025-01-15 23:00 UTC is still Jan 15 in UTC but Jan 16 at UTC+6.
-        let _tz = TzGuard::set("UTC-6"); // POSIX: 6h east → +0600
-        assert_eq!(local_utc_offset_secs(1_736_982_000), 6 * 3600);
-        assert_eq!(
-            date_string_from_unix_secs(1_736_982_000 + local_utc_offset_secs(1_736_982_000)),
-            "2025-01-16"
-        );
+        /// The load-bearing test for the local-timezone fix.
+        ///
+        /// At *any* instant the local calendar date at UTC+14 and at UTC-12
+        /// differ, because the two zones are 26 hours apart and a day is only 24 —
+        /// so this needs no pinned wall clock to be deterministic. Drop the
+        /// `+ local_utc_offset_secs(secs)` term from `today_date_string()` and both
+        /// calls collapse to the same UTC date, failing the assert.
+        ///
+        /// POSIX `TZ` offsets are sign-inverted relative to ISO: `UTC-14` is 14h
+        /// EAST of UTC (+1400) and `UTC+12` is 12h WEST (-1200). POSIX offset
+        /// strings, not zone names, so no tzdata install is required.
+        #[test]
+        fn today_date_string_uses_local_timezone() {
+            let east = {
+                let _tz = TzGuard::set("UTC-14");
+                today_date_string()
+            };
+            let west = {
+                let _tz = TzGuard::set("UTC+12");
+                today_date_string()
+            };
+            assert_ne!(
+                east, west,
+                "today_date_string() returned {east} at UTC+14 and {west} at UTC-12 — \
+                 zones 26h apart can never share a calendar date, so the local offset \
+                 is being ignored"
+            );
+        }
+
+        #[test]
+        fn local_offset_and_date_for_pinned_instant() {
+            // Deterministic value check to complement the not-equal test above.
+            // 2025-01-15 23:00 UTC is still Jan 15 in UTC but Jan 16 at UTC+6.
+            let _tz = TzGuard::set("UTC-6"); // POSIX: 6h east → +0600
+            assert_eq!(local_utc_offset_secs(1_736_982_000), 6 * 3600);
+            assert_eq!(
+                date_string_from_unix_secs(1_736_982_000 + local_utc_offset_secs(1_736_982_000)),
+                "2025-01-16"
+            );
+        }
+
+        #[test]
+        fn local_day_bounds_east_of_utc() {
+            // Local zone UTC+6 (POSIX spells it "UTC-6").
+            // 2025-01-15 20:30 UTC = 2025-01-16 02:30 local, so "today" locally is
+            // Jan 16, whose UTC window is [Jan 15 18:00, Jan 16 18:00).
+            let _tz = TzGuard::set("UTC-6");
+            let (start, end) = local_day_utc_bounds_at(1_736_973_000);
+            assert_eq!(start, "2025-01-15T18:00:00");
+            assert_eq!(end, "2025-01-16T18:00:00");
+        }
+
+        #[test]
+        fn local_day_bounds_west_of_utc() {
+            // Local zone UTC-6 (POSIX spells it "UTC+6").
+            // 2025-01-16 01:00 UTC = 2025-01-15 19:00 local, so "today" locally is
+            // Jan 15, whose UTC window is [Jan 15 06:00, Jan 16 06:00).
+            let _tz = TzGuard::set("UTC+6");
+            let (start, end) = local_day_utc_bounds_at(1_736_989_200);
+            assert_eq!(start, "2025-01-15T06:00:00");
+            assert_eq!(end, "2025-01-16T06:00:00");
+        }
     }
 
     #[cfg(unix)]
@@ -603,30 +733,6 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn local_day_bounds_east_of_utc() {
-        // Local zone UTC+6 (POSIX spells it "UTC-6").
-        // 2025-01-15 20:30 UTC = 2025-01-16 02:30 local, so "today" locally is
-        // Jan 16, whose UTC window is [Jan 15 18:00, Jan 16 18:00).
-        let _tz = TzGuard::set("UTC-6");
-        let (start, end) = local_day_utc_bounds_at(1_736_973_000);
-        assert_eq!(start, "2025-01-15T18:00:00");
-        assert_eq!(end, "2025-01-16T18:00:00");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn local_day_bounds_west_of_utc() {
-        // Local zone UTC-6 (POSIX spells it "UTC+6").
-        // 2025-01-16 01:00 UTC = 2025-01-15 19:00 local, so "today" locally is
-        // Jan 15, whose UTC window is [Jan 15 06:00, Jan 16 06:00).
-        let _tz = TzGuard::set("UTC+6");
-        let (start, end) = local_day_utc_bounds_at(1_736_989_200);
-        assert_eq!(start, "2025-01-15T06:00:00");
-        assert_eq!(end, "2025-01-16T06:00:00");
-    }
-
-    #[cfg(unix)]
-    #[test]
     fn local_day_bounds_always_contain_the_instant_they_were_built_from() {
         // Sweep a whole UTC day at 37-minute steps in the two extreme zones:
         // the window must contain `now` at every step, which is the property
@@ -653,6 +759,94 @@ mod tests {
         assert_eq!(start.len(), 19);
         assert_eq!(end.len(), 19);
         assert!(start < end);
+    }
+
+    // Windows reads the offset from the active system zone, which `TZ` does
+    // not drive, and CI runners sit on UTC, where a stub returning 0 would
+    // pass any live-zone check. So these pin hand-built zones through
+    // `offset_with_tz`; the two live-zone tests after them are smoke tests.
+    #[cfg(windows)]
+    fn fixed_zone(bias_minutes: i32) -> windows_sys::Win32::System::Time::TIME_ZONE_INFORMATION {
+        // All-zero StandardDate/DaylightDate (wMonth == 0) means no DST.
+        windows_sys::Win32::System::Time::TIME_ZONE_INFORMATION {
+            Bias: bias_minutes,
+            ..Default::default()
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_offset_is_seconds_east_of_utc_in_fixed_zones() {
+        // Win32 bias is "UTC = local + bias" in minutes, so UTC+6 is -360.
+        let east = fixed_zone(-360);
+        assert_eq!(offset_with_tz(1_736_982_000, Some(&east)), 21_600);
+        let west = fixed_zone(300);
+        assert_eq!(offset_with_tz(1_736_982_000, Some(&west)), -18_000);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_offset_follows_dst_rule() {
+        use windows_sys::Win32::Foundation::SYSTEMTIME;
+        // US Eastern: wYear 0 makes each date a yearly rule, with wDay the
+        // occurrence of wDayOfWeek (0 = Sunday) in wMonth.
+        let mut tz = fixed_zone(300);
+        tz.StandardBias = 0;
+        tz.DaylightBias = -60;
+        // Second Sunday in March, 02:00.
+        tz.DaylightDate = SYSTEMTIME {
+            wMonth: 3,
+            wDayOfWeek: 0,
+            wDay: 2,
+            wHour: 2,
+            ..Default::default()
+        };
+        // First Sunday in November, 02:00.
+        tz.StandardDate = SYSTEMTIME {
+            wMonth: 11,
+            wDayOfWeek: 0,
+            wDay: 1,
+            wHour: 2,
+            ..Default::default()
+        };
+        // 2025-01-15T23:00:00Z: standard time, UTC-5.
+        assert_eq!(offset_with_tz(1_736_982_000, Some(&tz)), -18_000);
+        // 2025-07-15T12:00:00Z: daylight time, UTC-4.
+        assert_eq!(offset_with_tz(1_752_580_800, Some(&tz)), -14_400);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_offset_is_a_real_zone_offset() {
+        let now = unix_now_secs().expect("system clock before the epoch");
+        let off = local_utc_offset_secs(now);
+        assert!(
+            (-12 * 3600..=14 * 3600).contains(&off),
+            "offset {off}s outside [-12h, +14h]"
+        );
+        // Every real zone offset is a whole number of quarter hours.
+        assert_eq!(off % 900, 0, "offset {off}s is not a multiple of 15 min");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_local_day_bounds_and_date_agree_at_now() {
+        let now = unix_now_secs().expect("system clock before the epoch");
+        let off = local_utc_offset_secs(now);
+        // UTC instant of the most recent local midnight.
+        let start_utc = now - (now + off).rem_euclid(86_400);
+        let (start, end) = local_day_utc_bounds_at(now);
+        assert_eq!(start, datetime_string_from_unix_secs(start_utc));
+        assert_eq!(end, datetime_string_from_unix_secs(start_utc + 86_400));
+        let now_s = datetime_string_from_unix_secs(now);
+        assert!(
+            now_s >= start && now_s < end,
+            "{now_s} outside [{start}, {end})"
+        );
+        assert_eq!(
+            today_date_string_at(now),
+            date_string_from_unix_secs(start_utc + off)
+        );
     }
 
     #[test]
