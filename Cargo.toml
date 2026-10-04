@@ -12,6 +12,7 @@ documentation = "https://docs.rs/keybr-tui"
 keywords = ["typing", "typing-trainer", "tui", "terminal", "keybr"]
 categories = ["command-line-utilities"]
 readme = "README.md"
+exclude = ["assets/", "demo/"]
 
 [package.metadata.docs.rs]
 all-features = true

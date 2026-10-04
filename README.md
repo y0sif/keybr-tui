@@ -15,6 +15,8 @@
 
 **Adaptive touch-typing practice for the terminal.** keybr-tui times every key you press, finds the ones slowing you down, and builds drills aimed straight at them. It is a faithful port of the [keybr.com](https://www.keybr.com) learning algorithm, runs entirely offline, and can [import your keybr.com history](#bring-your-keybrcom-history).
 
+<p align="center"><img src="assets/demo.gif" alt="keybr-tui demo: a typing lesson in the terminal, then per-lesson speed and accuracy, the per-key heatmap and a new letter unlocking, and the per-key progress screen" width="900"></p>
+
 ## Install
 
 ```bash
