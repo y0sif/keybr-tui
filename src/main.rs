@@ -77,7 +77,8 @@ fn parse_language(code: &str) -> Result<Language, String> {
 ///
 /// Saves nothing: `--data-dir` and `--import` use the language too, and a
 /// failed import must not switch the config to it. `main` writes it back
-/// (see `language_to_save`) only once it is about to launch the TUI.
+/// (see `remember_language`) only after a successful import or once it is
+/// about to launch the TUI.
 fn resolve_language(cli: Option<Language>, config: &Config) -> Language {
     if let Some(language) = cli {
         return language;
@@ -97,6 +98,16 @@ fn resolve_language(cli: Option<Language>, config: &Config) -> Language {
 fn language_to_save(cli: Option<Language>, config: &Config) -> Option<&'static str> {
     cli.map(Language::code)
         .filter(|&code| config.language != code)
+}
+
+/// Write `--language` back to config.toml (see `language_to_save`).
+fn remember_language(cli: Option<Language>, config: &mut Config) {
+    if let Some(code) = language_to_save(cli, config) {
+        config.language = code.to_string();
+        if let Err(e) = config.save() {
+            eprintln!("Warning: failed to save language to config: {e}");
+        }
+    }
 }
 
 fn main() -> color_eyre::Result<()> {
@@ -123,17 +134,16 @@ fn main() -> color_eyre::Result<()> {
     if let Some(ref import_path) = cli.import {
         let target_wpm = cli.target_wpm.unwrap_or(config.target_wpm);
         let target_cpm = target_wpm as f64 * 5.0;
-        return import::run_import(import_path, target_cpm, cli.force, language);
+        import::run_import(import_path, target_cpm, cli.force, language)?;
+        // Remembered only once the import succeeded, so the next plain
+        // launch opens the language just imported.
+        remember_language(cli.language, &mut config);
+        return Ok(());
     }
 
-    // --language is remembered only by a run that goes on to the TUI
-    // (including --reset), never by the print-and-exit flags above.
-    if let Some(code) = language_to_save(cli.language, &config) {
-        config.language = code.to_string();
-        if let Err(e) = config.save() {
-            eprintln!("Warning: failed to save language to config: {e}");
-        }
-    }
+    // --language is also remembered by a run that goes on to the TUI
+    // (including --reset), never by --data-dir.
+    remember_language(cli.language, &mut config);
 
     // --reset: delete stats file and continue fresh
     if cli.reset {
