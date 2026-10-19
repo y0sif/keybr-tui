@@ -75,6 +75,21 @@ pub fn key_tile_spans(
     ]
 }
 
+/// Terminal rows the heatmap needs to show `letter_count` tiles in
+/// `available_width` cells. One when the single row fits, so a wide
+/// terminal renders exactly as it always has; otherwise the fewest rows
+/// that fit. `render` spreads the tiles evenly over those rows
+/// (`letter_count.div_ceil(rows)` per row), which never exceeds the width
+/// and fills exactly this many rows. A width too narrow for even one tile
+/// stays at one clipped row: more rows would show nothing more.
+pub fn rows_for(letter_count: usize, available_width: u16) -> u16 {
+    let per_row = (available_width / TILE_WIDTH) as usize;
+    if per_row == 0 || letter_count <= per_row {
+        return 1;
+    }
+    letter_count.div_ceil(per_row) as u16
+}
+
 pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let active_set: std::collections::HashSet<char> =
         app.scheduler.active_keys.iter().copied().collect();
@@ -94,31 +109,42 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     // matching keybr.com's tile grid.
     // One tile per letter of the practice language, in alphabetical order.
     let letters = app.language.letters();
-    let mut spans: Vec<Span<'static>> = Vec::with_capacity(letters.len() * TILE_WIDTH as usize);
+    let tiles: Vec<Vec<Span<'static>>> = letters
+        .iter()
+        .map(|&key| {
+            let is_active = active_set.contains(&key);
+            let best_conf = app
+                .per_key_stats
+                .get(&key)
+                .map(|s| s.best_confidence(app.target_cpm))
+                .unwrap_or(0.0);
+            let is_focused = focus_letters.contains(&key);
 
-    for &key in letters {
-        let is_active = active_set.contains(&key);
-        let best_conf = app
-            .per_key_stats
-            .get(&key)
-            .map(|s| s.best_confidence(app.target_cpm))
-            .unwrap_or(0.0);
-        let is_focused = focus_letters.contains(&key);
+            key_tile_spans(
+                app.language,
+                key,
+                best_conf,
+                is_active,
+                is_focused,
+                is_focused && focus_is_pinned,
+            )
+        })
+        .collect();
 
-        spans.extend(key_tile_spans(
-            app.language,
-            key,
-            best_conf,
-            is_active,
-            is_focused,
-            is_focused && focus_is_pinned,
-        ));
-    }
+    // 3 cells per letter: 78 for English, 87 for Turkish, 90 for German.
+    // A row too wide for the area is split into balanced rows (the
+    // dashboard reserves `rows_for` of them) rather than cut off at the
+    // right edge. ratatui's `Wrap` can't do it: it breaks on whitespace,
+    // and every tile has a space inside it.
+    let rows = rows_for(letters.len(), area.width);
+    let per_row = letters.len().div_ceil(rows as usize).max(1);
+    let lines: Vec<Line<'static>> = tiles
+        .chunks(per_row)
+        .map(|row| Line::from(row.concat()))
+        .collect();
 
-    // 26 letters × 3 cells = 78 chars (29 × 3 = 87 for Turkish); center
-    // when it fits, otherwise
-    // left-align so the leading tiles stay visible if the terminal is
-    // narrow (we'd rather show ENIAR than nothing).
+    // Center the single row when it fits. Wrapped rows are left-aligned,
+    // so each tile column starts at the same x on every row.
     let row_width: u16 = letters.len() as u16 * TILE_WIDTH;
     let alignment = if area.width >= row_width {
         Alignment::Center
@@ -126,7 +152,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         Alignment::Left
     };
 
-    let para = Paragraph::new(Line::from(spans)).alignment(alignment);
+    let para = Paragraph::new(lines).alignment(alignment);
     frame.render_widget(para, area);
 }
 
@@ -169,6 +195,56 @@ mod tests {
         // Background carries the confidence color so the cell reads as a tile.
         assert_eq!(spans[1].style.bg, Some(Color::Green));
         assert_eq!(spans[1].style.fg, Some(Color::White));
+    }
+
+    #[test]
+    fn rows_for_keeps_one_row_while_it_fits() {
+        // Each language's row exactly fits, then needs a second row one
+        // cell narrower.
+        for (letters, row_width) in [(26, 78), (29, 87), (30, 90)] {
+            assert_eq!(rows_for(letters, row_width), 1, "{letters} letters");
+            assert_eq!(rows_for(letters, 200), 1, "{letters} letters");
+            assert_eq!(rows_for(letters, row_width - 1), 2, "{letters} letters");
+        }
+    }
+
+    #[test]
+    fn rows_for_degenerate_widths() {
+        for letters in [26, 29, 30] {
+            // Not even one tile fits: one clipped row, not a taller one.
+            for width in 0..TILE_WIDTH {
+                assert_eq!(rows_for(letters, width), 1, "{letters} at {width}");
+            }
+            for width in TILE_WIDTH..=12 {
+                let per_row = (width / TILE_WIDTH) as usize;
+                assert_eq!(
+                    rows_for(letters, width) as usize,
+                    letters.div_ceil(per_row),
+                    "{letters} at {width}"
+                );
+            }
+        }
+        assert_eq!(rows_for(0, 0), 1);
+        assert_eq!(rows_for(0, 80), 1);
+    }
+
+    /// The contract `render` and the dashboard's height rely on: the
+    /// balanced split fits the width, fills exactly `rows_for` rows, and
+    /// one row fewer would not fit.
+    #[test]
+    fn rows_for_balanced_split_fits_and_is_fewest() {
+        for letters in 1..=40usize {
+            for width in TILE_WIDTH..=130 {
+                let rows = rows_for(letters, width) as usize;
+                let per_row = letters.div_ceil(rows);
+                assert!(per_row as u16 * TILE_WIDTH <= width, "{letters} at {width}");
+                assert_eq!(letters.div_ceil(per_row), rows, "{letters} at {width}");
+                if rows > 1 {
+                    let fewer = letters.div_ceil(rows - 1);
+                    assert!(fewer as u16 * TILE_WIDTH > width, "{letters} at {width}");
+                }
+            }
+        }
     }
 
     #[test]
