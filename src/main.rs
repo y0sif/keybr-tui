@@ -24,6 +24,7 @@ use app::{App, ErrorMode};
 use config::{Config, ErrorModeSerde};
 use engine::Language;
 use events::setup_event_channel;
+use import::LayoutChoice;
 use persistence::SavedStats;
 use ui::view;
 use update::update;
@@ -58,6 +59,13 @@ struct Cli {
     /// With --import: replace existing stats (a .bak backup is written).
     #[arg(long)]
     force: bool,
+
+    /// With --import: the keybr.com layout family to import, since keybr.com
+    /// keeps each family's key stats apart. A family (colemak), a layout id
+    /// standing for its family (en-colemak), or "all" to merge every family.
+    /// Default: the family of your latest session.
+    #[arg(long, value_name = "LAYOUT", requires = "import", value_parser = LayoutChoice::parse)]
+    layout: Option<LayoutChoice>,
 
     // Practice language; the help text lists the codes (`language_help`).
     #[arg(long, value_name = "CODE", value_parser = parse_language, help = language_help())]
@@ -147,7 +155,8 @@ fn main() -> color_eyre::Result<()> {
     if let Some(ref import_path) = cli.import {
         let target_wpm = cli.target_wpm.unwrap_or(config.target_wpm);
         let target_cpm = target_wpm as f64 * 5.0;
-        import::run_import(import_path, target_cpm, cli.force, language)?;
+        let layout = cli.layout.unwrap_or_default();
+        import::run_import(import_path, target_cpm, cli.force, language, layout)?;
         // Remembered only once the import succeeded, so the next plain
         // launch opens the language just imported.
         remember_language(cli.language, &mut config);
@@ -356,6 +365,24 @@ mod tests {
         let err = parse_language("xx").unwrap_err();
         assert!(err.contains("en, tr, de"), "{err}");
         assert!(language_help().contains("en, tr, de"));
+    }
+
+    #[test]
+    fn layout_flag_needs_import_and_a_known_value() {
+        let parse = |args: &[&str]| Cli::try_parse_from([&["keybr-tui"], args].concat());
+        let cli = parse(&["--import", "data.json", "--layout", "en-colemak"]).unwrap();
+        assert_eq!(cli.layout, Some(LayoutChoice::Family("colemak")));
+        let cli = parse(&["--import", "data.json", "--layout", "all"]).unwrap();
+        assert_eq!(cli.layout, Some(LayoutChoice::All));
+        let cli = parse(&["--import", "data.json"]).unwrap();
+        assert_eq!(cli.layout, None);
+        assert!(parse(&["--layout", "colemak"]).is_err());
+        let err = parse(&["--import", "data.json", "--layout", "colemack"])
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(err.contains("'colemack'"), "{err}");
+        assert!(err.contains("layout family"), "{err}");
     }
 
     #[test]

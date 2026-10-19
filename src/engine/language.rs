@@ -11,6 +11,7 @@
 use std::sync::OnceLock;
 
 use crate::engine::filter::{FocusRule, FOCUS_PATTERNS};
+use crate::engine::layout;
 use crate::engine::transition::ModelLetters;
 
 /// A practice language. English is the default and keeps every file name,
@@ -180,12 +181,17 @@ impl Language {
     }
 
     /// True if a keybr.com layout id (`"en-us"`, `"tr-tr-q"`) belongs to
-    /// this language. keybr layout ids start with the language code, then
-    /// a `-` or, for some (`"en_focal"`), a `_`.
-    pub fn owns_layout(self, layout: &str) -> bool {
-        layout
-            .strip_prefix(self.code())
-            .is_some_and(|rest| rest.is_empty() || rest.starts_with(['-', '_']))
+    /// this language: the language keybr.com's layout table gives it. An
+    /// id the table lacks (one keybr.com added later) goes by the shape
+    /// every id in the table has: the language code, then the end, a `-`
+    /// or, for some (`"en_focal"`), a `_`.
+    pub fn owns_layout(self, id: &str) -> bool {
+        match layout::lookup(id) {
+            Some(info) => info.language == self.code(),
+            None => id
+                .strip_prefix(self.code())
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with(['-', '_'])),
+        }
     }
 
     /// Uppercase form of a letter for display. The language's own rules
@@ -420,6 +426,42 @@ mod tests {
         assert!(!Language::Turkish.owns_layout("en_focal"));
         assert!(!Language::English.owns_layout("es-es"));
         assert!(!Language::Turkish.owns_layout("es-es"));
+    }
+
+    #[test]
+    fn layouts_go_to_the_language_keybr_gives_them() {
+        let en = Language::English;
+        assert!(en.owns_layout("en-uk"));
+        assert!(!en.owns_layout("uk-ua"));
+        assert!(!en.owns_layout("br-chwerty-maths"));
+        assert!(!en.owns_layout("pt-br"));
+        assert!(Language::German.owns_layout("de-ch"));
+        assert!(Language::German.owns_layout("de-adnw-but-xcv"));
+        assert!(!Language::German.owns_layout("fr-ch"));
+        // Ids the table lacks fall back to the prefix shape.
+        assert!(en.owns_layout("en-some-new-layout"));
+        assert!(Language::German.owns_layout("de"));
+        assert!(!en.owns_layout("custom"));
+        assert!(!en.owns_layout("english"));
+        // The table agrees with the prefix rule keybr-tui used before it
+        // on every keybr.com layout, so no import changes language.
+        let prefix_rule = |lang: Language, id: &str| {
+            id.strip_prefix(lang.code())
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with(['-', '_']))
+        };
+        for info in layout::LAYOUTS {
+            for &lang in Language::ALL {
+                assert_eq!(
+                    lang.owns_layout(info.id),
+                    prefix_rule(lang, info.id),
+                    "{} {}",
+                    lang.code(),
+                    info.id
+                );
+            }
+        }
+        let english = layout::LAYOUTS.iter().filter(|l| en.owns_layout(l.id));
+        assert_eq!(english.count(), 37);
     }
 
     #[test]
