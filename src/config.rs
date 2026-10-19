@@ -109,9 +109,11 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub focus_pattern: Option<String>,
 
-    /// Practice language code (`"en"`, `"tr"`). Kept as the raw string so
-    /// a typo or a language this build does not know costs only the
-    /// language (with a warning in `main`), never the rest of the file.
+    /// Practice language code, one of
+    /// [`Language::supported_codes`](crate::engine::Language::supported_codes).
+    /// Kept as the raw string so a typo or a language this build does not
+    /// know costs only the language (with a warning in `main`), never the
+    /// rest of the file.
     /// Omitted when English, so English users' files stay byte-identical.
     #[serde(
         default = "default_language",
