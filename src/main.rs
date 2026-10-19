@@ -71,18 +71,15 @@ fn parse_language(code: &str) -> Result<Language, String> {
     Language::from_code(code).ok_or_else(|| "unknown language (supported: en, tr)".to_string())
 }
 
-/// Resolve the practice language: `--language` wins over the config file
-/// and is written back to it, so `keybr-tui --language tr` once is enough.
+/// Resolve the practice language: `--language` wins over the config file.
 /// An unknown code in the config file is only a warning, so a typo there
 /// never stops the app from starting.
-fn resolve_language(cli: Option<Language>, config: &mut Config) -> Language {
+///
+/// Saves nothing: `--data-dir` and `--import` use the language too, and a
+/// failed import must not switch the config to it. `main` writes it back
+/// (see `language_to_save`) only once it is about to launch the TUI.
+fn resolve_language(cli: Option<Language>, config: &Config) -> Language {
     if let Some(language) = cli {
-        if config.language != language.code() {
-            config.language = language.code().to_string();
-            if let Err(e) = config.save() {
-                eprintln!("Warning: failed to save language to config: {e}");
-            }
-        }
         return language;
     }
     Language::from_code(&config.language).unwrap_or_else(|| {
@@ -94,12 +91,20 @@ fn resolve_language(cli: Option<Language>, config: &mut Config) -> Language {
     })
 }
 
+/// The language code to write back to config.toml so that
+/// `keybr-tui --language tr` once is enough: `--language`'s code, unless
+/// the config already holds it (or the flag is absent).
+fn language_to_save(cli: Option<Language>, config: &Config) -> Option<&'static str> {
+    cli.map(Language::code)
+        .filter(|&code| config.language != code)
+}
+
 fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
 
     let cli = Cli::parse();
     let mut config = Config::load();
-    let language = resolve_language(cli.language, &mut config);
+    let language = resolve_language(cli.language, &config);
 
     // --data-dir: print path and exit
     if cli.data_dir {
@@ -119,6 +124,15 @@ fn main() -> color_eyre::Result<()> {
         let target_wpm = cli.target_wpm.unwrap_or(config.target_wpm);
         let target_cpm = target_wpm as f64 * 5.0;
         return import::run_import(import_path, target_cpm, cli.force, language);
+    }
+
+    // --language is remembered only by a run that goes on to the TUI
+    // (including --reset), never by the print-and-exit flags above.
+    if let Some(code) = language_to_save(cli.language, &config) {
+        config.language = code.to_string();
+        if let Err(e) = config.save() {
+            eprintln!("Warning: failed to save language to config: {e}");
+        }
     }
 
     // --reset: delete stats file and continue fresh
@@ -287,5 +301,40 @@ fn report_taria_counters(layer: &TariaLayer) {
             "keybr-tui: lost the answer to {acks} agent input(s): the bridge read them slower \
              than the app answered, so those agent calls timed out instead"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config_with(language: &str) -> Config {
+        Config {
+            language: language.to_string(),
+            ..Config::default()
+        }
+    }
+
+    #[test]
+    fn language_flag_wins_over_config() {
+        let tr = Language::Turkish;
+        assert_eq!(resolve_language(Some(tr), &config_with("en")), tr);
+        assert_eq!(resolve_language(None, &config_with("tr")), tr);
+        // An unknown code in the file only warns and falls back.
+        assert_eq!(
+            resolve_language(None, &config_with("xx")),
+            Language::English
+        );
+    }
+
+    #[test]
+    fn language_is_saved_only_when_the_flag_changes_it() {
+        let (en, tr) = (Language::English, Language::Turkish);
+        assert_eq!(language_to_save(Some(tr), &config_with("en")), Some("tr"));
+        assert_eq!(language_to_save(Some(tr), &config_with("tr")), None);
+        assert_eq!(language_to_save(Some(en), &config_with("en")), None);
+        // The flag replaces a code this build does not know.
+        assert_eq!(language_to_save(Some(en), &config_with("xx")), Some("en"));
+        assert_eq!(language_to_save(None, &config_with("tr")), None);
     }
 }
