@@ -1489,13 +1489,17 @@ mod tests {
         // letter, an English drill short of letters, junk, and a letter no
         // supported language has are dropped, and the next save erases
         // them, exactly as before languages existed.
+        assert!(
+            Language::ALL.iter().all(|l| !l.is_letter('þ')),
+            "the test needs a letter no supported language has"
+        );
         let mut app = App::new();
         for (pattern, letter) in [
             (None, Some('z')),
             (Some("-tion"), None),
             (Some("banana"), None),
             (None, Some('1')),
-            (None, Some('é')),
+            (None, Some('þ')),
         ] {
             app.set_manual_focus_from_config(pattern, letter);
             assert_eq!(app.manual_focus, None, "{pattern:?} {letter:?}");

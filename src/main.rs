@@ -358,8 +358,9 @@ mod tests {
     fn language_flag_lists_every_supported_code() {
         assert_eq!(parse_language("de"), Ok(Language::German));
         let err = parse_language("xx").unwrap_err();
-        assert!(err.contains("en, tr, de"), "{err}");
-        assert!(language_help().contains("en, tr, de"));
+        let codes = Language::supported_codes();
+        assert!(err.contains(&codes), "{err}");
+        assert!(language_help().contains(&codes));
     }
 
     #[test]

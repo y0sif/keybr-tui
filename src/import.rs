@@ -367,13 +367,26 @@ fn push_new(list: &mut Vec<String>, value: &str) {
 
 /// Why nothing was imported, for the `--import` error.
 fn nothing_imported(language: Language, path: &Path, summary: &ImportSummary) -> String {
+    // Some languages (`en-gb`, `hr`) have no keybr.com layouts of their
+    // own: keybr.com lets them be typed on another language's, and an
+    // export names only the layout, so no session can be told to be theirs.
+    let no_layouts = if layout::LAYOUTS.iter().any(|l| language.owns_layout(l.id)) {
+        None
+    } else {
+        Some(format!(
+            "; keybr.com has no layouts of its own for {}, so an export records its \
+             sessions under another language's layout and they cannot be told apart",
+            language.display_name()
+        ))
+    };
     let Some(family) = &summary.family else {
         return format!(
-            "no usable {} records in {} ({} skipped: other layout, {} skipped: invalid)",
+            "no usable {} records in {} ({} skipped: other layout, {} skipped: invalid){}",
             language.display_name(),
             path.display(),
             summary.skipped_layout,
-            summary.skipped_invalid
+            summary.skipped_invalid,
+            no_layouts.unwrap_or_default()
         );
     };
     // A family with no layout of the language at all (English with
@@ -381,22 +394,31 @@ fn nothing_imported(language: Language, path: &Path, summary: &ImportSummary) ->
     // name the supported languages it is for. A family the table lacks
     // is an unknown layout id of the language itself (`layout::family_of`).
     let in_family = || layout::LAYOUTS.iter().filter(|l| l.family == family);
-    let hint = if in_family().next().is_some() && !in_family().any(|l| language.owns_layout(l.id)) {
-        let others: Vec<String> = Language::ALL
+    let hint = if let Some(no_layouts) = no_layouts {
+        no_layouts
+    } else if in_family().next().is_some() && !in_family().any(|l| language.owns_layout(l.id)) {
+        let others: Vec<Language> = Language::ALL
             .iter()
+            .copied()
             .filter(|other| in_family().any(|l| other.owns_layout(l.id)))
-            .map(|other| {
-                format!(
-                    "for {} use --language {}",
-                    other.display_name(),
-                    other.code()
-                )
-            })
             .collect();
-        let suggestion = if others.is_empty() {
-            String::new()
-        } else {
-            format!("; {}", others.join(", "))
+        let suggestion = match others.as_slice() {
+            [] => String::new(),
+            [other] => format!(
+                "; for {} use --language {}",
+                other.display_name(),
+                other.code()
+            ),
+            // Codes keep a family shared by many languages (`qwerty`) to
+            // one short line.
+            _ => format!(
+                "; its layouts are for {} (pick one with --language)",
+                others
+                    .iter()
+                    .map(|o| o.code())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
         };
         format!(
             "; layout family {family} has no {} layouts{suggestion}",
@@ -1325,21 +1347,25 @@ mod tests {
             assert_eq!(summary.imported, 0, "{choice:?}");
             nothing_imported(language, path, &summary)
         };
-        // `qwertz` (German {DE}) has no English layout.
+        // `qwertz` (German {DE}) has no English layout, and is the family
+        // of several other languages, named by code in `Language::ALL` order.
         assert_eq!(
             message(Language::English, "de-de"),
             "no usable English records of layout family qwertz in typing-data.json \
              (1 skipped: other layout, 1 skipped: other layout family, 0 skipped: invalid); \
-             layout family qwertz has no English layouts; for Deutsch use --language de"
+             layout family qwertz has no English layouts; \
+             its layouts are for cs, de, fr, hu, sl (pick one with --language)"
         );
-        // `qwerty` is English and Turkish, among others.
+        // `qwerty` is English and Turkish, among many others.
         assert!(message(Language::German, "qwerty").ends_with(
-            "; layout family qwerty has no Deutsch layouts; \
-             for English use --language en, for Türkçe use --language tr"
+            "; layout family qwerty has no Deutsch layouts; its layouts are for \
+             en, da, es, et, fi, fr, it, nb, nl, pl, pt, ro, sv, tr (pick one with --language)"
         ));
-        // `azerty` is French and Dutch, which keybr-tui does not teach.
-        assert!(message(Language::English, "azerty")
-            .ends_with("; layout family azerty has no English layouts"));
+        // `azerty` is French and Dutch.
+        assert!(message(Language::English, "azerty").ends_with(
+            "; layout family azerty has no English layouts; \
+             its layouts are for fr, nl (pick one with --language)"
+        ));
 
         // An unknown layout id is a family of the language's own, though
         // the table has no layout of it.
@@ -1357,6 +1383,66 @@ mod tests {
             "no usable English records of layout family en-some-new-layout in typing-data.json \
              (0 skipped: other layout, 1 skipped: other layout family, 1 skipped: invalid); \
              other families: qwerty (--layout all merges every family)"
+        );
+    }
+
+    #[test]
+    fn nothing_imported_names_the_one_language_of_a_foreign_family() {
+        let path = Path::new("typing-data.json");
+        let records = vec![
+            session("en-us", "2024-05-01T12:00:00.000Z"),
+            session("de-de", "2024-05-02T12:00:00.000Z"),
+        ];
+        // `greek` is Greek's alone, so the hint names it.
+        let choice = LayoutChoice::parse("el-gr").unwrap();
+        let (_, summary) = super::replay(&records, 175.0, Language::English, choice);
+        assert_eq!(summary.imported, 0);
+        assert!(
+            nothing_imported(Language::English, path, &summary).ends_with(
+                "; layout family greek has no English layouts; for Ελληνικά use --language el"
+            )
+        );
+    }
+
+    #[test]
+    fn nothing_imported_explains_a_language_without_layouts() {
+        let without: Vec<Language> = Language::ALL
+            .iter()
+            .copied()
+            .filter(|lang| !layout::LAYOUTS.iter().any(|l| lang.owns_layout(l.id)))
+            .collect();
+        assert_eq!(without, [Language::EnglishUk, Language::Croatian]);
+
+        let path = Path::new("typing-data.json");
+        let records = vec![
+            session("en-uk", "2024-05-01T12:00:00.000Z"),
+            session("sl-si", "2024-05-02T12:00:00.000Z"),
+        ];
+        let why = "keybr.com has no layouts of its own for English (UK), so an export \
+                   records its sessions under another language's layout and they cannot \
+                   be told apart";
+        // No session of its own, so no latest family either.
+        let (_, summary) = replay(&records, 175.0, Language::EnglishUk);
+        assert_eq!(summary.imported, 0);
+        assert_eq!(
+            nothing_imported(Language::EnglishUk, path, &summary),
+            format!(
+                "no usable English (UK) records in typing-data.json \
+                 (2 skipped: other layout, 0 skipped: invalid); {why}"
+            )
+        );
+        // A family asked for gives the same reason, not that family's
+        // languages.
+        let choice = LayoutChoice::parse("qwerty").unwrap();
+        let (_, summary) = super::replay(&records, 175.0, Language::EnglishUk, choice);
+        assert!(nothing_imported(Language::EnglishUk, path, &summary).ends_with(why));
+        let (_, summary) = super::replay(&records, 175.0, Language::Croatian, choice);
+        assert!(
+            nothing_imported(Language::Croatian, path, &summary).ends_with(
+                "keybr.com has no layouts of its own for Hrvatski, so an export \
+                        records its sessions under another language's layout and they \
+                        cannot be told apart"
+            )
         );
     }
 

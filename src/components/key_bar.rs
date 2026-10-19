@@ -44,6 +44,10 @@ pub const TILE_WIDTH: u16 = 3;
 /// colored block. Background colors are intentionally scoped to the
 /// heatmap only — the typing area still defers to the terminal
 /// background per the brand rule.
+///
+/// Always three spans (pad, letter, pad) and `TILE_WIDTH` cells: the one
+/// two-cell label, Armenian `ԵՎ`, gets a single pad cell after it, so the
+/// row math in `rows_for` holds for every language.
 pub fn key_tile_spans(
     language: Language,
     key: char,
@@ -68,10 +72,12 @@ pub fn key_tile_spans(
         }
     }
 
+    let label = Span::styled(letter, style);
+    let pad = (TILE_WIDTH as usize).saturating_sub(label.width());
     vec![
-        Span::styled(" ", style),
-        Span::styled(letter, style),
-        Span::styled(" ", style),
+        Span::styled(" ".repeat(pad / 2), style),
+        label,
+        Span::styled(" ".repeat(pad - pad / 2), style),
     ]
 }
 
@@ -195,6 +201,23 @@ mod tests {
         // Background carries the confidence color so the cell reads as a tile.
         assert_eq!(spans[1].style.bg, Some(Color::Green));
         assert_eq!(spans[1].style.fg, Some(Color::White));
+    }
+
+    #[test]
+    fn two_letter_tile_still_takes_three_cells() {
+        let spans = key_tile_spans(Language::Armenian, 'և', 1.0, true, false, false);
+        assert_eq!(spans.len(), 3);
+        assert_eq!(spans[0].content, "");
+        assert_eq!(spans[1].content, "ԵՎ");
+        assert_eq!(spans[2].content, " ");
+        // Every tile of every language is exactly one tile wide.
+        for &language in Language::ALL {
+            for &key in language.letters() {
+                let spans = key_tile_spans(language, key, 0.0, true, true, true);
+                let width: usize = spans.iter().map(Span::width).sum();
+                assert_eq!(width, TILE_WIDTH as usize, "{language:?} '{key}'");
+            }
+        }
     }
 
     #[test]
