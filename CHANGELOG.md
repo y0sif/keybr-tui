@@ -14,14 +14,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frequency-derived letter order, shows all 29 letters in the heatmap with
   Turkish case rules (`i` → `İ`, `ı` → `I`), and keeps its stats in its own
   `stats-tr.json`. `--import` replays the Turkish sessions of a keybr.com
-  export when run with `--language tr`.
+  export when Turkish is the practice language.
 - German practice language (`--language de` or `language = "de"` in
   `config.toml`). It uses keybr.com's German phonetic model, word list
   (without its capitalised words, which keybr.com's lessons never offer)
   and frequency-derived letter order (starting `e n t i r l`), shows all 30
   letters in the heatmap (`ß` as `ẞ`), and keeps its stats in its own
   `stats-de.json`. `--import` replays the German sessions of a keybr.com
-  export when run with `--language de`.
+  export when German is the practice language.
+- A Language row in Settings, the last row, cycling English, Türkçe and
+  Deutsch with Left/Right. Switching takes effect at once, the same as
+  relaunching with `--language`: the current language's stats are saved,
+  the chosen language's own stats load (its unlocked letters, key speeds
+  and history), the next lesson is in that language, and `config.toml`
+  remembers the choice. `--import` and `--reset` still act on the language
+  from `--language` or `config.toml`.
 - `--layout <LAYOUT>` for `--import`: the keybr.com layout family to import,
   given as a family (`colemak`), a layout id standing for its family
   (`en-colemak`), or `all`. Sessions are matched to their language and

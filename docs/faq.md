@@ -66,7 +66,7 @@ Yes. Typing is layout-agnostic: keybr-tui reads whatever character your OS sends
 
 ## Does it support languages other than English?
 
-Yes: English, Turkish and German. Run `keybr-tui --language tr` or `keybr-tui --language de` to switch (later runs remember it). Each language uses keybr.com's phonetic model, word list and letter unlock order for that language, and keeps its own stats. See the "Languages" section of the README.
+Yes: English, Turkish and German. Switch with the "Language" row in Settings (Left/Right), or run `keybr-tui --language tr` or `keybr-tui --language de`; either way, later runs remember it. Each language uses keybr.com's phonetic model, word list and letter unlock order for that language, and keeps its own stats. See the "Languages" section of the README.
 
 ## How can I contribute?
 
