@@ -82,7 +82,7 @@ keybr-tui [OPTIONS]
 |------|-------------|
 | `--target-wpm <N>` | Target typing speed in words per minute (default: 35) |
 | `--error-mode <MODE>` | `move-on` (default) or `stop-on-error` |
-| `--reset` | Delete saved stats and start fresh |
+| `--reset` | Delete the practice language's saved stats and start fresh |
 | `--data-dir` | Print the data directory path and exit |
 | `--import <FILE>` | Import a keybr.com data export and exit (see below) |
 | `--force` | With `--import`, replace existing stats (a `.bak` backup is kept) |
@@ -104,18 +104,18 @@ Already practicing on [keybr.com](https://www.keybr.com)? Carry your progress ov
    keybr-tui --import typing-data.json
    ```
 
-The importer replays every session through the same per-key smoothing keybr.com uses, so your unlocked letters, per-key speeds, and focus letter come out exactly as the website computed them.
+The importer replays the sessions of your practice language and layout family (see below) through the same per-key smoothing keybr.com uses, so your unlocked letters, per-key speeds, and focus letter come out exactly as the website computed them.
 
 A few details worth knowing:
 
 - Your target speed is not part of the export. If you use a non-default target on keybr.com, pass `--target-wpm <N>` alongside `--import`, since the unlocked set is derived against it. With no flag, the target saved in your config is used.
 - Only sessions in the practice language are imported: `keybr-tui --language tr --import typing-data.json` takes the Turkish (`tr-tr-*`) sessions, a plain `--import` the English ones.
-- keybr.com keeps separate key stats for each layout family (`qwerty`, `qwertz`, `dvorak`, `colemak` and so on), so the importer takes one family: by default, the family of your most recent session in the practice language. Pick another with `--layout colemak` (a family) or `--layout en-colemak` (a layout id, standing for its family), or merge every family into one set of key stats with `--layout all`. The report names the family it imported and counts the sessions it skipped. Turkish Q (family `qwerty`) and Turkish F (`tr-tr-f`) are separate families, so a mixed Turkish export imports only the latest of the two unless you pass `--layout all`.
+- keybr.com keeps separate key stats for each layout family, a group of layouts it treats as one (US and UK QWERTY are both `qwerty`, while `dvorak`, `colemak` and `colemak-dh` are each their own), so the importer takes one family: by default, the family of your most recent session in the practice language. Pick another with `--layout colemak` (a family) or `--layout en-colemak` (a layout id as stored in the export, standing for its family), or merge every family into one set of key stats with `--layout all`. The report names the family it imported and counts the sessions it skipped. Turkish Q (family `qwerty`) and Turkish F (family `tr-tr-f`) are separate families, so a mixed Turkish export imports only the latest of the two unless you pass `--layout all`.
 - Existing local stats are never overwritten unless you pass `--force`, which still writes a `.bak` backup of that language's stats file first.
 
 ## Languages
 
-English, Turkish and German are supported. Each uses keybr.com's own data for that language: its phonetic model, its word list, and its letter order (Turkish starts from `a e i n ı r`, German from `e n t i r l`). The heatmap shows the language's whole alphabet, with Turkish dotted and dotless i as separate keys (`İ` and `I`) and German `ß` shown as `ẞ`.
+English, Turkish and German are supported. Each uses keybr.com's own data for that language: its phonetic model, its word list, and its letter order (Turkish starts from `a e i n ı r`, German from `e n t i r l`). The heatmap shows the language's whole alphabet, with Turkish dotted and dotless i as separate keys (`İ` and `I`) and German `ß` shown as `ẞ`. keybr.com leaves `ß` out of its lessons on the Swiss German layout (`de-ch` has no ß key), while keybr-tui always teaches all 30 German letters.
 
 ```bash
 keybr-tui --language tr   # switch to Turkish; later runs remember it

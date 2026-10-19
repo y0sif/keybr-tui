@@ -10,11 +10,13 @@
 //! both the family and the language of every id.
 //!
 //! `LAYOUTS` is keybr.com's `Layout.ALL` (packages/keybr-keyboard/lib/layout.ts
-//! at commit 05a37bc), in the same order. It leaves out `Layout.custom`
-//! and the layouts commented out of `Layout.ALL`, which keybr.com does not
-//! offer. To regenerate it, take each `Layout.ALL` item's `new Layout(...)`
-//! in layout.ts and write one `row` of its `id=`, its `language=` constant's
-//! `id=` (packages/keybr-keyboard/lib/language.ts) and its `family=`.
+//! at commit 05a37bc), in the order layout.ts declares the layouts, which
+//! is not `Layout.ALL`'s own order. It leaves out `Layout.custom` and the
+//! layouts commented out of `Layout.ALL`, which keybr.com does not offer.
+//! To regenerate it, go through the `new Layout(...)` declarations in
+//! layout.ts from top to bottom, skip those, and write one `row` of each
+//! one's `id=`, its `language=` constant's `id=`
+//! (packages/keybr-keyboard/lib/language.ts) and its `family=`.
 
 /// One keybr.com layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,7 +38,7 @@ const fn row(id: &'static str, language: &'static str, family: &'static str) -> 
     }
 }
 
-/// Every layout keybr.com offers, in `Layout.ALL` order.
+/// Every layout keybr.com offers, in layout.ts declaration order.
 #[rustfmt::skip]
 pub static LAYOUTS: &[LayoutInfo] = &[
     row("en-us",                             "en", "qwerty"),

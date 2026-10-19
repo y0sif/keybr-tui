@@ -1350,6 +1350,28 @@ mod tests {
     }
 
     #[test]
+    fn foreign_letter_pins_survive_german_and_english_sessions() {
+        // German cannot use an English pin on 'q' (a German letter, locked
+        // here) or a Turkish pin on 'ş' (not a German letter), but keeps both.
+        let mut de = App::new_with_language(35, ErrorMode::ForgiveMistakes, None, Language::German);
+        assert!(Language::German.is_letter('q'));
+        assert!(!de.scheduler.active_keys.contains(&'q'));
+        for letter in ['q', 'ş'] {
+            de.set_manual_focus_from_config(None, Some(letter));
+            assert_eq!(de.manual_focus, None, "{letter}");
+            let cfg = de.to_config();
+            assert_eq!(cfg.focus_letter, Some(letter));
+            assert_eq!(cfg.language, "de");
+        }
+
+        // English keeps a German pin on 'ß', which it could never have set.
+        let mut en = App::new();
+        en.set_manual_focus_from_config(None, Some('ß'));
+        assert_eq!(en.manual_focus, None, "'ß' is not an English letter");
+        assert_eq!(en.to_config().focus_letter, Some('ß'));
+    }
+
+    #[test]
     fn english_still_erases_pins_it_cannot_use() {
         // The English-only path is unchanged: a pin on a locked English
         // letter, an English drill short of letters, junk, and a letter no

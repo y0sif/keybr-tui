@@ -52,7 +52,8 @@ struct Cli {
     data_dir: bool,
 
     /// Import a keybr.com data export (typing-data.json) and exit.
-    /// Rebuilds per-key stats and unlocked letters from the full history.
+    /// Rebuilds per-key stats and unlocked letters from the practice
+    /// language's sessions in one layout family (see --layout).
     #[arg(long, value_name = "FILE")]
     import: Option<std::path::PathBuf>,
 
