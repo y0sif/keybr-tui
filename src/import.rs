@@ -376,7 +376,33 @@ fn nothing_imported(language: Language, path: &Path, summary: &ImportSummary) ->
             summary.skipped_invalid
         );
     };
-    let hint = if summary.skipped_family > 0 {
+    // A family with no layout of the language at all (English with
+    // `--layout de-de`, which is `qwertz`) can never import anything, so
+    // name the supported languages it is for. A family the table lacks
+    // is an unknown layout id of the language itself (`layout::family_of`).
+    let in_family = || layout::LAYOUTS.iter().filter(|l| l.family == family);
+    let hint = if in_family().next().is_some() && !in_family().any(|l| language.owns_layout(l.id)) {
+        let others: Vec<String> = Language::ALL
+            .iter()
+            .filter(|other| in_family().any(|l| other.owns_layout(l.id)))
+            .map(|other| {
+                format!(
+                    "for {} use --language {}",
+                    other.display_name(),
+                    other.code()
+                )
+            })
+            .collect();
+        let suggestion = if others.is_empty() {
+            String::new()
+        } else {
+            format!("; {}", others.join(", "))
+        };
+        format!(
+            "; layout family {family} has no {} layouts{suggestion}",
+            language.display_name()
+        )
+    } else if summary.skipped_family > 0 {
         format!(
             "; other families: {} (--layout all merges every family)",
             summary.skipped_families.join(", ")
@@ -1283,6 +1309,54 @@ mod tests {
         assert_eq!(
             nothing_imported(Language::German, path, &summary),
             "no usable Deutsch records in typing-data.json (2 skipped: other layout, 0 skipped: invalid)"
+        );
+    }
+
+    #[test]
+    fn nothing_imported_names_the_languages_of_a_foreign_family() {
+        let path = Path::new("typing-data.json");
+        let records = vec![
+            session("en-us", "2024-05-01T12:00:00.000Z"),
+            session("de-de", "2024-05-02T12:00:00.000Z"),
+        ];
+        let message = |language: Language, choice: &str| {
+            let choice = LayoutChoice::parse(choice).unwrap();
+            let (_, summary) = super::replay(&records, 175.0, language, choice);
+            assert_eq!(summary.imported, 0, "{choice:?}");
+            nothing_imported(language, path, &summary)
+        };
+        // `qwertz` (German {DE}) has no English layout.
+        assert_eq!(
+            message(Language::English, "de-de"),
+            "no usable English records of layout family qwertz in typing-data.json \
+             (1 skipped: other layout, 1 skipped: other layout family, 0 skipped: invalid); \
+             layout family qwertz has no English layouts; for Deutsch use --language de"
+        );
+        // `qwerty` is English and Turkish, among others.
+        assert!(message(Language::German, "qwerty").ends_with(
+            "; layout family qwerty has no Deutsch layouts; \
+             for English use --language en, for Türkçe use --language tr"
+        ));
+        // `azerty` is French and Dutch, which keybr-tui does not teach.
+        assert!(message(Language::English, "azerty")
+            .ends_with("; layout family azerty has no English layouts"));
+
+        // An unknown layout id is a family of the language's own, though
+        // the table has no layout of it.
+        let records = vec![
+            session("en-us", "2024-05-01T12:00:00.000Z"),
+            ExportRecord {
+                length: 0,
+                ..session("en-some-new-layout", "2024-05-02T12:00:00.000Z")
+            },
+        ];
+        let (_, summary) = replay(&records, 175.0, Language::English);
+        assert_eq!(summary.family.as_deref(), Some("en-some-new-layout"));
+        assert_eq!(
+            nothing_imported(Language::English, path, &summary),
+            "no usable English records of layout family en-some-new-layout in typing-data.json \
+             (0 skipped: other layout, 1 skipped: other layout family, 1 skipped: invalid); \
+             other families: qwerty (--layout all merges every family)"
         );
     }
 

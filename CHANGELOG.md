@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The engine no longer assumes the alphabet is `a-z`: the transition table
   reads its alphabet from the model file, the dictionary and word lengths are
   UTF-8 aware, and the unlock order, heatmap and import filter come from the
-  practice language. English behaviour, files and generated text are
+  practice language. English practice, files and generated text are
   unchanged.
 - `--import` now imports one layout family, as keybr.com keeps key stats
   per family: by default the family of your most recent session in the
