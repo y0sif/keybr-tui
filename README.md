@@ -91,7 +91,7 @@ keybr-tui [OPTIONS]
 | `--help` | Show help |
 | `--version` | Show version |
 
-**In-session keys:** `Esc` returns to the menu or quits, `Enter` selects a menu item or dismisses the lesson summary, the arrow keys navigate menus and settings, and `Left`/`Right` adjust setting values.
+**In-session keys:** `Esc` returns to the menu or quits, `Enter` selects a menu item or dismisses the lesson summary, the arrow keys navigate menus and settings and scroll a Progress list too long for the window (`PageUp`/`PageDown`, `Home`/`End` too), and `Left`/`Right` adjust setting values.
 
 ## Bring your keybr.com history
 
@@ -109,7 +109,7 @@ The importer replays the sessions of your practice language and layout family (s
 A few details worth knowing:
 
 - Your target speed is not part of the export. If you use a non-default target on keybr.com, pass `--target-wpm <N>` alongside `--import`, since the unlocked set is derived against it. With no flag, the target saved in your config is used.
-- Only sessions on the practice language's layouts, by keybr.com's layout table, are imported: `keybr-tui --language tr --import typing-data.json` takes the Turkish (`tr-tr-q`, `tr-tr-f`) sessions, a plain `--import` those of your saved practice language (English by default). keybr.com has no layouts of its own for English (UK) or Croatian (its `en-uk` layout counts as English), and an export records only the layout, so an `en-gb` or `hr` import finds no sessions and the error says why.
+- Only sessions on the practice language's layouts, by keybr.com's layout table, are imported: `keybr-tui --language tr --import typing-data.json` takes the Turkish (`tr-tr-q`, `tr-tr-f`) sessions, a plain `--import` those of your saved practice language (English by default). keybr.com has no layouts of its own for English (UK) or Croatian (keybr.com's `en-uk` layout counts as English), and an export records only the layout, so an `en-gb` or `hr` import finds no sessions and the error says why.
 - keybr.com keeps separate key stats for each layout family, a group of layouts it treats as one (US and UK QWERTY are both `qwerty`, while `dvorak`, `colemak` and `colemak-dh` are each their own), so the importer takes one family: by default, the family of your most recent session in the practice language. Pick another with `--layout colemak` (a family) or `--layout en-colemak` (a layout id as stored in the export, standing for its family), or merge every family into one set of key stats with `--layout all`. The report names the family it imported and counts the sessions it skipped. A `--layout` family with no layouts of the practice language imports nothing, and the error names which of keybr-tui's languages it belongs to. Turkish Q (family `qwerty`) and Turkish F (family `tr-tr-f`) are separate families, so a mixed Turkish export imports only the latest of the two unless you pass `--layout all`.
 - Existing local stats are never overwritten unless you pass `--force`, which still writes a `.bak` backup of that language's stats file first.
 
@@ -131,7 +131,7 @@ keybr-tui teaches 27 languages. Each uses keybr.com's own data for that language
 
 The heatmap shows the language's whole alphabet, one tile per letter. Turkish dotted and dotless i are separate keys (`İ` and `I`), German `ß` shows as `ẞ` and Armenian `և` as `ԵՎ`. Greek tiles keep their accents (`Ά`, `Έ`) and show final sigma as `ς`, so every tile is distinct; keybr.com drops most of those accents and shows `ς` as `Σ`. keybr.com leaves `ß` out of its lessons on the Swiss German layout (`de-ch` has no ß key), while keybr-tui always teaches all 30 German letters.
 
-Switch languages in Settings: the last row, Language, cycles through them with `Left`/`Right`, showing each by its own name (the one in parentheses). The switch is immediate and works like relaunching with `--language`: your current stats are saved, the chosen language's own stats load (its unlocked letters, key speeds and history), the next lesson is in that language, and the config remembers the choice. Or pick it at launch, by code or by name in English or in the language itself:
+Switch languages in Settings: the last row, Language, cycles through them with `Left`/`Right`, showing each by its own name (the one in parentheses, or `English` and `English (UK)`). The switch is immediate and works like relaunching with `--language`: your current stats are saved, the chosen language's own stats load (its unlocked letters, key speeds and history), the next lesson is in that language, and the config remembers the choice. Or pick it at launch, by code or by name in English or in the language itself:
 
 ```bash
 keybr-tui --language fr         # switch to French; later runs remember it

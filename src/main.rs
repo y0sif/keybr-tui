@@ -78,7 +78,7 @@ struct Cli {
 /// never goes stale when a language is added.
 fn language_help() -> String {
     format!(
-        "Practice language: {} (default en). Saved to config.toml, so later runs keep it. Each language keeps its own stats.",
+        "Practice language: {} (default en), or its name. Saved to config.toml, so later runs keep it. Each language keeps its own stats.",
         Language::supported_codes()
     )
 }

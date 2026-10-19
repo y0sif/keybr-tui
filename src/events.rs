@@ -34,10 +34,9 @@ pub fn setup_event_channel() -> Receiver<AppEvent> {
                     break;
                 }
             // The height comes from `terminal::size()`, the call ratatui
-            // sizes each frame with, not from the event: on Windows the
-            // event carries the console buffer's height, which can exceed
-            // the visible window, and the Progress scroll would then stop
-            // short of the last rows.
+            // sizes each frame with, so the Progress scroll limits always
+            // match the frame that is drawn; the event's rows are only the
+            // fallback.
             Ok(Event::Resize(_, rows))
                 if tx
                     .send(AppEvent::Resize(
