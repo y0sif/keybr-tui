@@ -851,4 +851,30 @@ mod tests {
         assert_eq!(summary.imported, 0);
         assert_eq!(summary.skipped_layout, 1);
     }
+
+    #[test]
+    fn english_import_keeps_focal_sessions() {
+        // keybr.com's Focal layout id is `en_focal`, with an underscore.
+        let samples = || {
+            vec![
+                entry('e', 10, 0, 400),
+                entry('n', 10, 0, 400),
+                entry('i', 10, 0, 400),
+            ]
+        };
+        let records = vec![
+            ExportRecord {
+                layout: "en_focal".to_string(),
+                ..record(samples())
+            },
+            record(samples()),
+        ];
+        let (_, summary) = replay(&records, 175.0, Language::English);
+        assert_eq!(summary.imported, 2);
+        assert_eq!(summary.skipped_layout, 0);
+        assert_eq!(
+            summary.layouts,
+            vec!["en_focal".to_string(), "en-us".to_string()]
+        );
+    }
 }

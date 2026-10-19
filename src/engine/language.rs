@@ -137,12 +137,12 @@ impl Language {
     }
 
     /// True if a keybr.com layout id (`"en-us"`, `"tr-tr-q"`) belongs to
-    /// this language. keybr layout ids start with the language code.
+    /// this language. keybr layout ids start with the language code, then
+    /// a `-` or, for some (`"en_focal"`), a `_`.
     pub fn owns_layout(self, layout: &str) -> bool {
         layout
-            .split('-')
-            .next()
-            .is_some_and(|prefix| prefix == self.code())
+            .strip_prefix(self.code())
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with(['-', '_']))
     }
 
     /// Uppercase form of a letter for display. Turkish has dotted and
@@ -253,6 +253,11 @@ mod tests {
         assert!(Language::English.owns_layout("en-us"));
         assert!(Language::English.owns_layout("en-dvorak"));
         assert!(!Language::English.owns_layout("tr-tr-q"));
+        // keybr.com's Focal layout id uses an underscore.
+        assert!(Language::English.owns_layout("en_focal"));
+        assert!(!Language::Turkish.owns_layout("en_focal"));
+        assert!(!Language::English.owns_layout("es-es"));
+        assert!(!Language::Turkish.owns_layout("es-es"));
     }
 
     #[test]
