@@ -142,6 +142,39 @@ mod tests {
         }
     }
 
+    /// On a short terminal the settings box still holds every row, the
+    /// Language row last with its language's own name, and the hint below.
+    #[test]
+    fn short_terminal_settings_keep_the_language_row_and_the_hint() {
+        for &language in Language::ALL {
+            let mut app = App::new_with_language(35, ErrorMode::ForgiveMistakes, None, language);
+            app.screen = AppScreen::Settings;
+            let mut terminal = Terminal::new(TestBackend::new(120, 14)).expect("terminal");
+            terminal.draw(|frame| view(&app, frame)).expect("draw");
+            let buffer = terminal.backend().buffer().clone();
+            let rows: Vec<String> = (0..14).map(|y| row_text(&buffer, y)).collect();
+
+            let language_row = rows
+                .iter()
+                .position(|r| r.contains("Language"))
+                .unwrap_or_else(|| panic!("{language:?}: no Language row in {rows:#?}"));
+            assert!(
+                rows[language_row].contains(language.display_name()),
+                "{language:?}"
+            );
+            assert!(
+                rows[language_row - 1].contains("Focus pattern"),
+                "{language:?}"
+            );
+            assert!(
+                rows[language_row + 1..]
+                    .iter()
+                    .any(|r| r.contains("[Esc] Back to menu")),
+                "{language:?}: hint clipped in {rows:#?}"
+            );
+        }
+    }
+
     /// Wide enough for the single row, the dashboard keeps its five rows
     /// and the heatmap sits centered on row 1, as it always has.
     #[test]

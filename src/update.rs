@@ -12,8 +12,9 @@ use taria_ratatui::to_crossterm_key;
 
 use crate::app::{App, AppScreen, ErrorMode};
 use crate::components::menu::MENU_ITEMS;
-use crate::components::settings::SETTINGS_COUNT;
+use crate::components::settings::{LANGUAGE_ROW, SETTINGS_COUNT};
 use crate::engine::filter::FocusRule;
+use crate::engine::Language;
 use crate::events::AppEvent;
 use crate::persistence::today_date_string;
 #[cfg(unix)]
@@ -500,6 +501,27 @@ fn cycle_manual_pattern(app: &mut App, forward: bool) -> bool {
     true
 }
 
+/// Request a switch to the next (`forward`, the Right key) or previous
+/// practice language in `Language::ALL`, wrapping at both ends.
+///
+/// Only records the request: a switch saves this language's stats and
+/// loads the new one's, so `App::flush_pending_saves` performs it. Steps
+/// from the language already requested, if any, so two steps queued
+/// before a flush (agent inputs are drained twice per loop iteration)
+/// land two languages on. Stepping back to the current language leaves
+/// nothing pending.
+fn step_language(app: &mut App, forward: bool) {
+    let all = Language::ALL;
+    let from = app.pending_language_switch.unwrap_or(app.language);
+    let current = all.iter().position(|&l| l == from).unwrap_or(0);
+    let next = if forward {
+        (current + 1) % all.len()
+    } else {
+        (current + all.len() - 1) % all.len()
+    };
+    app.pending_language_switch = Some(all[next]).filter(|&l| l != app.language);
+}
+
 fn handle_settings_key(app: &mut App, key: KeyEvent) {
     use KeyCode::*;
 
@@ -560,6 +582,13 @@ fn handle_settings_key(app: &mut App, key: KeyEvent) {
                     // Step focus pattern backward (Off wraps to the last drill).
                     cycle_manual_pattern(app, false)
                 }
+                LANGUAGE_ROW => {
+                    // Request the previous language (the first wraps to the
+                    // last). No save here: the App the switch builds
+                    // requests its own config save.
+                    step_language(app, false);
+                    false
+                }
                 _ => false,
             };
             if changed {
@@ -604,6 +633,12 @@ fn handle_settings_key(app: &mut App, key: KeyEvent) {
                 5 => {
                     // Step focus pattern forward (the last drill wraps to Off).
                     cycle_manual_pattern(app, true)
+                }
+                LANGUAGE_ROW => {
+                    // Request the next language (the last wraps to the
+                    // first). See the Left arm for why nothing is saved.
+                    step_language(app, true);
+                    false
                 }
                 _ => false,
             };
@@ -1106,6 +1141,105 @@ mod tests {
         assert_eq!(cfg.focus_pattern, None);
     }
 
+    // --- Language row ---
+
+    /// An App practicing `language`, parked on the Settings language row.
+    fn app_on_language_row(language: Language) -> App {
+        let mut app = App::new_with_language(35, ErrorMode::ForgiveMistakes, None, language);
+        app.screen = AppScreen::Settings;
+        app.settings_selection = LANGUAGE_ROW;
+        app
+    }
+
+    #[test]
+    fn language_row_is_the_last_row() {
+        // Settings starts on row 0 at launch, so the first visit never
+        // opens on the Language row.
+        assert_eq!(LANGUAGE_ROW, SETTINGS_COUNT - 1);
+        assert_eq!(App::new().settings_selection, 0);
+    }
+
+    #[test]
+    fn language_right_requests_the_next_language_and_wraps() {
+        let first = Language::ALL[0];
+        let last = *Language::ALL.last().unwrap();
+
+        let mut app = app_on_language_row(first);
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Right)));
+        assert_eq!(app.pending_language_switch, Some(Language::ALL[1]));
+        assert_eq!(app.language, first, "update only records the switch");
+
+        let mut app = app_on_language_row(last);
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Right)));
+        assert_eq!(app.pending_language_switch, Some(first));
+        assert_eq!(app.language, last);
+    }
+
+    #[test]
+    fn language_left_requests_the_previous_language_and_wraps() {
+        let first = Language::ALL[0];
+        let last = *Language::ALL.last().unwrap();
+
+        let mut app = app_on_language_row(first);
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Left)));
+        assert_eq!(app.pending_language_switch, Some(last));
+        assert_eq!(app.language, first, "update only records the switch");
+
+        let mut app = app_on_language_row(Language::ALL[1]);
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Left)));
+        assert_eq!(app.pending_language_switch, Some(first));
+    }
+
+    #[test]
+    fn two_language_steps_before_a_flush_land_two_languages_on() {
+        // Agent inputs are drained twice per loop iteration, so two steps
+        // can queue up before `flush_pending_saves` performs either.
+        let mut app = app_on_language_row(Language::English);
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Right)));
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Right)));
+        assert_eq!(app.pending_language_switch, Some(Language::ALL[2]));
+
+        let mut app = app_on_language_row(Language::English);
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Left)));
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Left)));
+        assert_eq!(
+            app.pending_language_switch,
+            Some(Language::ALL[Language::ALL.len() - 2])
+        );
+        assert_eq!(app.language, Language::English);
+    }
+
+    #[test]
+    fn stepping_back_to_the_current_language_leaves_no_switch_pending() {
+        let mut app = app_on_language_row(Language::Turkish);
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Right)));
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Left)));
+        assert_eq!(app.pending_language_switch, None);
+
+        // All the way round lands on the current language too.
+        for _ in 0..Language::ALL.len() {
+            update(&mut app, AppEvent::Key(make_key(KeyCode::Right)));
+        }
+        assert_eq!(app.pending_language_switch, None);
+        assert_eq!(app.language, Language::Turkish);
+    }
+
+    #[test]
+    fn language_row_saves_nothing_itself_and_ignores_enter() {
+        // The App the switch builds requests the config save (see
+        // `App::switched_to`), so the row raises no flag of its own.
+        let mut app = app_on_language_row(Language::English);
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Right)));
+        assert!(!app.pending_config_save);
+        assert!(!app.pending_stats_save);
+
+        let mut app = app_on_language_row(Language::English);
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Enter)));
+        assert_eq!(app.pending_language_switch, None);
+        assert!(!app.pending_config_save);
+        assert_eq!(app.error_mode, ErrorMode::ForgiveMistakes);
+    }
+
     // --- Deferred persistence: update must only raise flags, never write ---
 
     #[test]
@@ -1279,6 +1413,28 @@ mod tests {
             assert_eq!(app.fragment_length, 110);
             assert_eq!(app.settings_selection, 2);
             assert_eq!(app.target_wpm(), 35, "other rows stay untouched");
+        }
+
+        #[test]
+        fn agent_settings_language_acts_request_a_switch() {
+            let mut app = App::new();
+            app.screen = AppScreen::Settings;
+            assert_eq!(
+                apply_agent_input(
+                    &mut app,
+                    act("setting-language", Action::Custom("increase".into()))
+                ),
+                Applied::Handled
+            );
+            assert_eq!(app.settings_selection, LANGUAGE_ROW);
+            assert_eq!(app.pending_language_switch, Some(Language::ALL[1]));
+            assert_eq!(app.language, Language::English);
+
+            apply_agent_input(
+                &mut app,
+                act("setting-language", Action::Custom("decrease".into())),
+            );
+            assert_eq!(app.pending_language_switch, None);
         }
 
         #[test]

@@ -209,29 +209,20 @@ fn main() -> color_eyre::Result<()> {
     let mut terminal = tui::init()?;
 
     let mut app = App::new_with_language(target_wpm, error_mode, saved_stats, language);
-    app.fragment_length = config.fragment_length;
-    app.natural_words = config.natural_words;
-    app.daily_goal_minutes = config.daily_goal_minutes;
-    app.alphabet_size = config.alphabet_size;
-    app.scheduler.alphabet_size = config.alphabet_size;
-    // Re-run the scheduler now that the configured alphabet_size is in
-    // place: the constructor ran it with the default (0.0), so letters
-    // force-unlocked by alphabet_size are not yet in `active_keys`. This
-    // must happen BEFORE the pin normalization below, which drops any pin
-    // not in `active_keys` — otherwise a valid pin on a forced letter
-    // would be dropped and erased by the next config save. It also
-    // refreshes the available drill list, which the pattern pin below is
-    // validated against.
-    app.run_scheduler_update();
-    app.set_manual_focus_from_config(config.focus_pattern.as_deref(), config.focus_letter);
-    app.generator.set_natural_words(app.natural_words);
+    // The rest of the settings come from config.toml, through the helper
+    // the in-app language switch uses too. Order matters there: the
+    // scheduler re-runs with the configured alphabet_size BEFORE the pins
+    // are validated, so a pin on a force-unlocked letter survives (see
+    // `App::apply_config`).
+    app.apply_config(&config);
     let rx = setup_event_channel();
 
     while app.running {
         // Agent inputs are drained around the blocking recv below; the
         // 50ms tick bounds the latency between an agent act and its
-        // effect. `apply_agent_input` is as pure as `update` — it only
-        // raises the same save flags, flushed at the bottom of the loop.
+        // effect. `apply_agent_input` is as pure as `update`: it only
+        // raises the same save flags and language switch request,
+        // flushed at the bottom of the loop.
         #[cfg(unix)]
         drain_agent_input(&mut app, &layer);
 
@@ -250,9 +241,11 @@ fn main() -> color_eyre::Result<()> {
         #[cfg(unix)]
         drain_agent_input(&mut app, &layer);
 
-        // `update` never touches the disk — it only raises save flags.
-        // Flushing here (including on the quit event, before the loop
-        // exits) is the single place user files get written.
+        // `update` never touches the disk: it only raises save flags and
+        // records a language switch. Flushing here (including on the quit
+        // event, before the loop exits) is the single place user files get
+        // written, and the switch, which loads the new language's stats
+        // and replaces `app`, happens here too.
         app.flush_pending_saves();
     }
 

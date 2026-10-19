@@ -43,6 +43,7 @@ pub const SETTING_SLUGS: [&str; SETTINGS_COUNT] = [
     "alphabet-size",
     "focus-letter",
     "focus-pattern",
+    "language",
 ];
 
 /// Lowercased, dash-separated form of a menu label ("Start Practice" ->
@@ -252,6 +253,7 @@ fn settings_nodes(app: &App) -> Vec<Node> {
         ),
         ("Focus letter", focus_letter_value(app)),
         ("Focus pattern", focus_pattern_value(app)),
+        ("Language", app.language.display_name().to_string()),
     ];
     let children = rows.into_iter().enumerate().map(|(i, (label, value))| {
         Node::new(setting_id(i), Role::ListItem)
@@ -272,6 +274,7 @@ fn settings_nodes(app: &App) -> Vec<Node> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::components::settings::LANGUAGE_ROW;
     use crate::engine::filter::FocusRule;
     use crate::engine::scheduler::UNLOCK_ORDER;
 
@@ -352,6 +355,7 @@ mod tests {
         for i in 0..SETTINGS_COUNT {
             assert_eq!(setting_index(&setting_id(i)), Some(i));
         }
+        assert_eq!(setting_id(LANGUAGE_ROW), "setting-language");
         assert_eq!(menu_item_index("menu-nope"), None);
         assert_eq!(menu_item_index("settings"), None);
         assert_eq!(setting_index("setting-nope"), None);
@@ -453,6 +457,7 @@ mod tests {
             // instead of publishing an empty value or an "Off" that
             // implies something could be switched on.
             ("setting-focus-pattern", "None yet"),
+            ("setting-language", "English"),
         ];
         for (id, value) in expect {
             let node = find(&nodes, id).expect(id);
@@ -544,6 +549,19 @@ mod tests {
                 .as_deref(),
             Some("None yet")
         );
+    }
+
+    #[test]
+    fn language_row_publishes_the_practice_language() {
+        for &language in crate::engine::Language::ALL {
+            let mut app = App::new_with_language(35, ErrorMode::ForgiveMistakes, None, language);
+            app.screen = AppScreen::Settings;
+            let nodes = build_nodes(&app);
+            assert_eq!(
+                find(&nodes, "setting-language").unwrap().value.as_deref(),
+                Some(language.display_name())
+            );
+        }
     }
 
     #[test]

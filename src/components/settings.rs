@@ -10,7 +10,12 @@ use crate::app::{App, ErrorMode};
 use crate::engine::filter::FocusRule;
 
 /// Settings items the user can navigate between.
-pub const SETTINGS_COUNT: usize = 6;
+pub const SETTINGS_COUNT: usize = 7;
+
+/// Index of the Language row. Last on purpose: `settings_selection`
+/// starts at 0 at launch, so the first visit to Settings never opens on
+/// the Language row. Later visits return to the row last selected.
+pub const LANGUAGE_ROW: usize = 6;
 
 /// Value shown by the "Focus letter" row: the pinned letter, or "Auto"
 /// when the scheduler picks. A pattern pin shares the same field, and
@@ -53,11 +58,11 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Percentage(30),
-            // Title + blank + 6 rows + blank + hint = 10 lines, plus a
-            // row of slack. The sixth row used up the slack the old
-            // Min(10) had, and a settings screen that silently clips its
+            // Title + blank + 7 rows + blank + hint = 11 lines, plus a
+            // row of slack. Each new row takes a line from that slack, so
+            // grow this with it: a settings screen that silently clips its
             // "[Esc] Back to menu" hint is worse than a taller box.
-            Constraint::Min(11),
+            Constraint::Min(12),
             Constraint::Percentage(30),
         ])
         .split(area);
@@ -211,6 +216,34 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         Span::styled(format!("[  {}  ]", focus_pattern_value(app)), pattern_style),
         Span::styled(
             "     Left/Right to adjust",
+            Style::default().fg(Color::DarkGray),
+        ),
+    ]));
+
+    // Language (each one has its own stats, loaded when switched to)
+    let language_style = if app.settings_selection == LANGUAGE_ROW {
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let language_marker = if app.settings_selection == LANGUAGE_ROW {
+        "> "
+    } else {
+        "  "
+    };
+    lines.push(Line::from(vec![
+        Span::styled(
+            format!("{}Language            ", language_marker),
+            language_style,
+        ),
+        Span::styled(
+            format!("[  {}  ]", app.language.display_name()),
+            language_style,
+        ),
+        Span::styled(
+            "     Left/Right to switch",
             Style::default().fg(Color::DarkGray),
         ),
     ]));
