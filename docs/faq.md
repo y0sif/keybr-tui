@@ -47,10 +47,12 @@ offering 16 presets: 8 bigram reaches (`cr`, `pl`, `br`, `tr`, `gr`, `fr`, `bl`,
 and 8 word endings (`-ing`, `-ed`, `-er`, `-ly`, `-tion`, `-ment`, `-able`, `-ous`). A
 preset only shows up once your unlocked letters can spell enough real words to fill a
 lesson, so the list starts empty and grows as you unlock more. A fresh profile reaches
-none of them and the row reads "None yet"; the first drill, `-ER`, arrives with your
-seventh letter, and all 16 are available by 21 letters. Picking a pattern clears any
-letter pin, since only one focus can be active at a time, and drills always draw from
-the embedded word list, regardless of the "natural words" setting.
+none of them and the row reads "None yet"; the first drill arrives with your seventh
+letter (`-ER` in English, `TR` in English (UK)), and all 16 are available by 21
+letters. Picking a pattern clears any letter pin, since only one focus can be active
+at a time, and drills always draw from the embedded word list, regardless of the
+"natural words" setting. The presets are English bigrams and endings, so only English
+and English (UK) offer them.
 
 ## How do I change my target WPM?
 
@@ -66,7 +68,7 @@ Yes. Typing is layout-agnostic: keybr-tui reads whatever character your OS sends
 
 ## Does it support languages other than English?
 
-Yes: English, Turkish and German. Switch with the "Language" row in Settings (Left/Right), or run `keybr-tui --language tr` or `keybr-tui --language de`; either way, later runs remember it. Each language uses keybr.com's phonetic model, word list and letter unlock order for that language, and keeps its own stats. See the "Languages" section of the README.
+Yes, 27 in all: Armenian, Belarusian, Croatian, Czech, Danish, Dutch, English, English (UK), Estonian, Finnish, French, German, Greek, Hungarian, Italian, Latvian, Lithuanian, Norwegian Bokmål, Polish, Portuguese, Romanian, Russian, Slovenian, Spanish, Swedish, Turkish and Ukrainian. Switch with the "Language" row in Settings (Left/Right), or run `keybr-tui --language <code>` (`fr`, or a name such as `french`); either way, later runs remember it. Each language uses keybr.com's phonetic model, word list and letter unlock order for that language, and keeps its own stats. The "Languages" section of the README lists the codes.
 
 ## How can I contribute?
 
