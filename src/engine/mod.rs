@@ -3,6 +3,7 @@ pub mod dictionary;
 pub mod filter;
 pub mod generator;
 pub mod language;
+pub mod layout;
 pub mod scheduler;
 pub mod transition;
 

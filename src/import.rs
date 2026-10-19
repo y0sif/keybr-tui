@@ -13,7 +13,7 @@ use std::path::Path;
 use color_eyre::eyre::{eyre, WrapErr};
 use serde::Deserialize;
 
-use crate::engine::{Language, LetterScheduler};
+use crate::engine::{layout, Language, LetterScheduler};
 use crate::metrics::KeyStats;
 use crate::persistence::{
     local_day_utc_bounds_at, today_date_string_at, unix_now_secs, SavedKeyStats, SavedLessonResult,
@@ -91,19 +91,81 @@ fn timestamp_in_window(time_stamp: &str, start: &str, end: &str) -> bool {
     time_stamp >= start && time_stamp < end
 }
 
+/// Which of the language's sessions an import replays (`--layout`).
+///
+/// keybr.com practices with the sessions of the current layout's family
+/// only (`Lesson.filter`), so {US} and {UK} share key stats while Colemak
+/// keeps its own. keybr-tui keeps stats per language, so the family is
+/// picked among the language's sessions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LayoutChoice {
+    /// The family of the language's most recent session, the closest an
+    /// export comes to keybr.com's current layout.
+    #[default]
+    Latest,
+    /// Every family merged into one set of key stats (`--layout all`), as
+    /// imports did before families.
+    All,
+    /// One family, in the layout table's spelling.
+    Family(&'static str),
+}
+
+impl LayoutChoice {
+    /// Parse a `--layout` value: `all`, a keybr.com layout id (meaning its
+    /// family) or a family name, all ignoring case.
+    pub fn parse(value: &str) -> Result<Self, String> {
+        let value = value.trim();
+        if value.eq_ignore_ascii_case("all") {
+            return Ok(LayoutChoice::All);
+        }
+        if let Some(info) = layout::lookup(&value.to_lowercase()) {
+            return Ok(LayoutChoice::Family(info.family));
+        }
+        layout::find_family(value)
+            .map(LayoutChoice::Family)
+            .ok_or_else(|| {
+                "not a keybr.com layout or layout family (expected all, a layout id \
+                 such as en-colemak, or a family such as colemak)"
+                    .to_string()
+            })
+    }
+}
+
+/// The layout family of the language's most recent session. Export stamps
+/// are fixed-width UTC (see `timestamp_in_window`), so the greatest string
+/// is the latest; of equal stamps the one later in the file wins.
+fn latest_family(records: &[ExportRecord], language: Language) -> Option<&str> {
+    records
+        .iter()
+        .filter(|r| language.owns_layout(&r.layout))
+        .max_by(|a, b| a.time_stamp.cmp(&b.time_stamp))
+        .map(|r| layout::family_of(&r.layout))
+}
+
 /// Outcome counters and headline numbers for the post-import report.
 #[derive(Debug, Default)]
 pub struct ImportSummary {
     pub total: usize,
     pub imported: usize,
     pub skipped_layout: usize,
+    /// The language's sessions typed in another layout family than the
+    /// one imported.
+    pub skipped_family: usize,
     pub skipped_invalid: usize,
     pub unlocked_letters: usize,
     pub focused_key: Option<char>,
+    /// The layout family imported: `None` with `--layout all`, or when
+    /// the language has no sessions to take a family from.
+    pub family: Option<String>,
     /// Distinct layout ids among the imported sessions, in first-seen
-    /// order. More than one (e.g. Turkish Q and F) means their key timings
-    /// were merged, which the report warns about.
+    /// order.
     pub layouts: Vec<String>,
+    /// Distinct families among the imported sessions, in first-seen order.
+    /// More than one (only with `--layout all`) means their key timings
+    /// were merged, which the report warns about.
+    pub families: Vec<String>,
+    /// Distinct families of the sessions counted in `skipped_family`.
+    pub skipped_families: Vec<String>,
     pub total_practice_secs: u64,
     /// Mean WPM over the last (up to) 10 imported sessions.
     pub recent_wpm: Option<f64>,
@@ -115,6 +177,7 @@ pub fn replay(
     records: &[ExportRecord],
     target_cpm: f64,
     language: Language,
+    choice: LayoutChoice,
 ) -> (SavedStats, ImportSummary) {
     // One clock reading for both derived values. Reading it twice (once for the
     // window, once for the date label) can straddle local midnight and stamp
@@ -127,7 +190,14 @@ pub fn replay(
     // Empty string on that same clock-error path, exactly what
     // `today_date_string()` yields there.
     let today_date = now.map(today_date_string_at).unwrap_or_default();
-    replay_with_window(records, target_cpm, today_window, today_date, language)
+    replay_with_window(
+        records,
+        target_cpm,
+        today_window,
+        today_date,
+        language,
+        choice,
+    )
 }
 
 /// Core of [`replay`] with the "is this session today?" window and the local
@@ -139,12 +209,19 @@ fn replay_with_window(
     today_window: Option<(String, String)>,
     today_date: String,
     language: Language,
+    choice: LayoutChoice,
 ) -> (SavedStats, ImportSummary) {
     const HISTORY_CAP: usize = 50;
     const RECENT_TIMES_CAP: usize = 50;
 
+    let family = match choice {
+        LayoutChoice::Latest => latest_family(records, language),
+        LayoutChoice::All => None,
+        LayoutChoice::Family(family) => Some(family),
+    };
     let mut summary = ImportSummary {
         total: records.len(),
+        family: family.map(str::to_string),
         ..ImportSummary::default()
     };
 
@@ -158,6 +235,13 @@ fn replay_with_window(
         // another language can't be replayed into it.
         if !language.owns_layout(&record.layout) {
             summary.skipped_layout += 1;
+            continue;
+        }
+        // keybr.com keeps one layout family's key stats at a time.
+        let record_family = layout::family_of(&record.layout);
+        if family.is_some_and(|f| f != record_family) {
+            summary.skipped_family += 1;
+            push_new(&mut summary.skipped_families, record_family);
             continue;
         }
 
@@ -219,9 +303,8 @@ fn replay_with_window(
         }
         summary.total_practice_secs += record.time / 1000;
         last_time_stamp = record.time_stamp.clone();
-        if !summary.layouts.contains(&record.layout) {
-            summary.layouts.push(record.layout.clone());
-        }
+        push_new(&mut summary.layouts, &record.layout);
+        push_new(&mut summary.families, record_family);
         summary.imported += 1;
     }
 
@@ -275,14 +358,85 @@ fn replay_with_window(
     (saved, summary)
 }
 
+/// Append `value` unless `list` already has it, keeping first-seen order.
+fn push_new(list: &mut Vec<String>, value: &str) {
+    if !list.iter().any(|v| v == value) {
+        list.push(value.to_string());
+    }
+}
+
+/// Why nothing was imported, for the `--import` error.
+fn nothing_imported(language: Language, path: &Path, summary: &ImportSummary) -> String {
+    let Some(family) = &summary.family else {
+        return format!(
+            "no usable {} records in {} ({} skipped: other layout, {} skipped: invalid)",
+            language.display_name(),
+            path.display(),
+            summary.skipped_layout,
+            summary.skipped_invalid
+        );
+    };
+    let hint = if summary.skipped_family > 0 {
+        format!(
+            "; other families: {} (--layout all merges every family)",
+            summary.skipped_families.join(", ")
+        )
+    } else {
+        String::new()
+    };
+    format!(
+        "no usable {} records of layout family {family} in {} ({} skipped: other layout, \
+         {} skipped: other layout family, {} skipped: invalid){hint}",
+        language.display_name(),
+        path.display(),
+        summary.skipped_layout,
+        summary.skipped_family,
+        summary.skipped_invalid
+    )
+}
+
+/// The report's lines on layout families: the family imported and how it
+/// was chosen, the sessions left out for another family, and the note when
+/// `--layout all` merged several.
+fn family_report(summary: &ImportSummary, choice: LayoutChoice) -> Vec<String> {
+    let mut lines = Vec::new();
+    lines.push(match (&summary.family, choice) {
+        (Some(family), LayoutChoice::Latest) => format!(
+            "Layout family: {family}, from your latest session (--layout picks another, \
+             or all)."
+        ),
+        (Some(family), _) => format!("Layout family: {family}, from --layout."),
+        (None, _) => format!(
+            "Layout family: all ({}), from --layout all.",
+            summary.families.join(", ")
+        ),
+    });
+    if summary.skipped_family > 0 {
+        lines.push(format!(
+            "Skipped {} sessions in other layout families ({}); --layout all merges them.",
+            summary.skipped_family,
+            summary.skipped_families.join(", ")
+        ));
+    }
+    if summary.families.len() > 1 {
+        lines.push(format!(
+            "Note: sessions from several layouts ({}) were merged into one set of key stats.",
+            summary.layouts.join(", ")
+        ));
+    }
+    lines
+}
+
 /// Full `--import` flow: parse the export, replay it, back up any existing
 /// stats file, save, and print a report. Refuses to overwrite existing
-/// stats unless `force` is set.
+/// stats unless `force` is set. `choice` picks the layout family
+/// (`--layout`).
 pub fn run_import(
     path: &Path,
     target_cpm: f64,
     force: bool,
     language: Language,
+    choice: LayoutChoice,
 ) -> color_eyre::Result<()> {
     let stats_path = SavedStats::path(language)
         .ok_or_else(|| eyre!("could not determine the data directory"))?;
@@ -299,15 +453,9 @@ pub fn run_import(
     let records: Vec<ExportRecord> = serde_json::from_str(&contents)
         .wrap_err("not a keybr.com export — expected a JSON array of result records")?;
 
-    let (saved, summary) = replay(&records, target_cpm, language);
+    let (saved, summary) = replay(&records, target_cpm, language, choice);
     if summary.imported == 0 {
-        return Err(eyre!(
-            "no usable {} records in {} ({} skipped: other layout, {} skipped: invalid)",
-            language.display_name(),
-            path.display(),
-            summary.skipped_layout,
-            summary.skipped_invalid
-        ));
+        return Err(eyre!(nothing_imported(language, path, &summary)));
     }
 
     if stats_path.exists() {
@@ -326,11 +474,8 @@ pub fn run_import(
         summary.skipped_layout,
         summary.skipped_invalid
     );
-    if summary.layouts.len() > 1 {
-        println!(
-            "Note: sessions from several layouts ({}) were merged into one set of key stats.",
-            summary.layouts.join(", ")
-        );
+    for line in family_report(&summary, choice) {
+        println!("{line}");
     }
     println!(
         "Unlocked letters: {}/{}{} — derived against your {:.0} WPM target \
@@ -363,6 +508,16 @@ pub fn run_import(
 mod tests {
     use super::*;
     use crate::persistence::{datetime_string_from_unix_secs, today_date_string};
+
+    /// [`super::replay`] with the default layout choice, the family of the
+    /// latest session, which is all most tests need.
+    fn replay(
+        records: &[ExportRecord],
+        target_cpm: f64,
+        language: Language,
+    ) -> (SavedStats, ImportSummary) {
+        super::replay(records, target_cpm, language, LayoutChoice::Latest)
+    }
 
     fn entry(ch: char, hits: u32, misses: u32, time: u32) -> HistogramEntry {
         HistogramEntry {
@@ -707,6 +862,7 @@ mod tests {
             window,
             "2025-01-16".to_string(),
             Language::English,
+            LayoutChoice::Latest,
         );
         assert_eq!(summary.imported, 2);
         // Only the in-window session counts toward the daily goal...
@@ -722,8 +878,14 @@ mod tests {
         // daily goal — same as the old `!today.is_empty()` guard did when
         // `today_date_string()` returned "".
         let records = vec![dated_record("2025-01-15T20:30:00.000Z", 30_000)];
-        let (saved, summary) =
-            replay_with_window(&records, 175.0, None, String::new(), Language::English);
+        let (saved, summary) = replay_with_window(
+            &records,
+            175.0,
+            None,
+            String::new(),
+            Language::English,
+            LayoutChoice::Latest,
+        );
         assert_eq!(summary.imported, 1);
         assert_eq!(saved.today_seconds_practiced, 0);
         assert_eq!(summary.total_practice_secs, 30);
@@ -816,7 +978,9 @@ mod tests {
     }
 
     #[test]
-    fn turkish_import_reports_mixed_layouts() {
+    fn turkish_q_and_f_are_separate_families() {
+        // keybr.com puts Turkish Q in the `qwerty` family and F in its own
+        // `tr-tr-f`, so by default only the latest one's sessions import.
         let samples = || {
             vec![
                 entry('a', 30, 1, 300),
@@ -824,16 +988,41 @@ mod tests {
                 entry('ş', 10, 1, 400),
             ]
         };
+        let at = |layout: &str, time_stamp: &str| ExportRecord {
+            time_stamp: time_stamp.to_string(),
+            ..turkish_record(layout, samples())
+        };
         let records = vec![
-            turkish_record("tr-tr-q", samples()),
-            turkish_record("tr-tr-f", samples()),
-            turkish_record("tr-tr-q", samples()),
+            at("tr-tr-q", "2024-05-01T12:00:00.000Z"),
+            at("tr-tr-f", "2024-05-03T12:00:00.000Z"),
+            at("tr-tr-q", "2024-05-02T12:00:00.000Z"),
         ];
         let (_, summary) = replay(&records, 175.0, Language::Turkish);
+        assert_eq!(summary.family.as_deref(), Some("tr-tr-f"));
+        assert_eq!(summary.imported, 1);
+        assert_eq!(summary.skipped_family, 2);
+        assert_eq!(summary.skipped_layout, 0);
+        assert_eq!(summary.skipped_families, vec!["qwerty".to_string()]);
+        assert_eq!(summary.layouts, vec!["tr-tr-f".to_string()]);
+
+        // `--layout all` merges both, and the report says so.
+        let (_, summary) = super::replay(&records, 175.0, Language::Turkish, LayoutChoice::All);
         assert_eq!(summary.imported, 3);
+        assert_eq!(summary.skipped_family, 0);
         assert_eq!(
             summary.layouts,
             vec!["tr-tr-q".to_string(), "tr-tr-f".to_string()]
+        );
+        assert_eq!(
+            summary.families,
+            vec!["qwerty".to_string(), "tr-tr-f".to_string()]
+        );
+        let report = family_report(&summary, LayoutChoice::All);
+        assert!(
+            report
+                .iter()
+                .any(|l| l.starts_with("Note: sessions from several layouts (tr-tr-q, tr-tr-f)")),
+            "{report:?}"
         );
     }
 
@@ -869,12 +1058,264 @@ mod tests {
             },
             record(samples()),
         ];
-        let (_, summary) = replay(&records, 175.0, Language::English);
+        // Focal is a family of its own, so only `--layout all` takes both.
+        let (_, summary) = super::replay(&records, 175.0, Language::English, LayoutChoice::All);
         assert_eq!(summary.imported, 2);
         assert_eq!(summary.skipped_layout, 0);
         assert_eq!(
             summary.layouts,
             vec!["en_focal".to_string(), "en-us".to_string()]
         );
+        assert_eq!(
+            summary.families,
+            vec!["focal".to_string(), "qwerty".to_string()]
+        );
+    }
+
+    /// A three-letter English session in `layout`, stamped `time_stamp`.
+    fn session(layout: &str, time_stamp: &str) -> ExportRecord {
+        ExportRecord {
+            layout: layout.to_string(),
+            time_stamp: time_stamp.to_string(),
+            ..record(vec![
+                entry('e', 10, 0, 400),
+                entry('n', 10, 0, 400),
+                entry('i', 10, 0, 400),
+            ])
+        }
+    }
+
+    /// Two QWERTY sessions and one Colemak session, with the latest of
+    /// them in the given layout and neither first nor last in the file.
+    fn mixed_english(latest: &str) -> Vec<ExportRecord> {
+        let other = if latest == "en-colemak" {
+            "en-us"
+        } else {
+            "en-colemak"
+        };
+        vec![
+            session("en-us", "2024-05-01T12:00:00.000Z"),
+            session(latest, "2024-05-03T09:30:00.000Z"),
+            session(other, "2024-05-02T23:59:59.999Z"),
+            // Later still, but Turkish: not the English import's latest.
+            session("tr-tr-f", "2024-06-01T00:00:00.000Z"),
+            session("en-us", "2024-05-03T09:29:59.999Z"),
+        ]
+    }
+
+    #[test]
+    fn default_imports_the_family_of_the_latest_session() {
+        let (_, summary) = replay(&mixed_english("en-colemak"), 175.0, Language::English);
+        assert_eq!(summary.family.as_deref(), Some("colemak"));
+        assert_eq!(summary.imported, 1);
+        assert_eq!(summary.skipped_family, 3);
+        assert_eq!(summary.skipped_layout, 1);
+        assert_eq!(summary.skipped_families, vec!["qwerty".to_string()]);
+        assert_eq!(summary.layouts, vec!["en-colemak".to_string()]);
+
+        let (saved, summary) = replay(&mixed_english("en-us"), 175.0, Language::English);
+        assert_eq!(summary.family.as_deref(), Some("qwerty"));
+        assert_eq!(summary.imported, 3);
+        assert_eq!(summary.skipped_family, 1);
+        assert_eq!(summary.skipped_families, vec!["colemak".to_string()]);
+        assert_eq!(saved.total_lessons, 3);
+        assert_eq!(saved.keys[&'e'].attempts, 30);
+        assert_eq!(
+            summary.total,
+            summary.imported
+                + summary.skipped_layout
+                + summary.skipped_family
+                + summary.skipped_invalid
+        );
+    }
+
+    #[test]
+    fn equal_stamps_go_to_the_later_record() {
+        let stamp = "2024-05-01T12:00:00.000Z";
+        let records = vec![session("en-colemak", stamp), session("en-us", stamp)];
+        let (_, summary) = replay(&records, 175.0, Language::English);
+        assert_eq!(summary.family.as_deref(), Some("qwerty"));
+        let records = vec![session("en-us", stamp), session("en-colemak", stamp)];
+        let (_, summary) = replay(&records, 175.0, Language::English);
+        assert_eq!(summary.family.as_deref(), Some("colemak"));
+    }
+
+    #[test]
+    fn several_layouts_of_one_family_merge_without_a_note() {
+        // {US} and {UK} are both `qwerty`, as on keybr.com.
+        let records = vec![
+            session("en-us", "2024-05-01T12:00:00.000Z"),
+            session("en-uk", "2024-05-02T12:00:00.000Z"),
+        ];
+        let (_, summary) = replay(&records, 175.0, Language::English);
+        assert_eq!(summary.imported, 2);
+        assert_eq!(
+            summary.layouts,
+            vec!["en-us".to_string(), "en-uk".to_string()]
+        );
+        assert_eq!(summary.families, vec!["qwerty".to_string()]);
+        let report = family_report(&summary, LayoutChoice::Latest);
+        assert_eq!(
+            report,
+            vec![
+                "Layout family: qwerty, from your latest session (--layout picks another, or all)."
+                    .to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn layout_all_merges_every_family() {
+        let records = mixed_english("en-colemak");
+        let (saved, summary) = super::replay(&records, 175.0, Language::English, LayoutChoice::All);
+        assert_eq!(summary.family, None);
+        assert_eq!(summary.imported, 4);
+        assert_eq!(summary.skipped_family, 0);
+        assert_eq!(summary.skipped_layout, 1);
+        assert_eq!(saved.keys[&'e'].attempts, 40);
+        assert_eq!(
+            summary.families,
+            vec!["qwerty".to_string(), "colemak".to_string()]
+        );
+        let report = family_report(&summary, LayoutChoice::All);
+        assert_eq!(
+            report[0],
+            "Layout family: all (qwerty, colemak), from --layout all."
+        );
+        assert_eq!(
+            report[1],
+            "Note: sessions from several layouts (en-us, en-colemak) were merged into one set of key stats."
+        );
+        assert_eq!(report.len(), 2);
+    }
+
+    #[test]
+    fn layout_flag_picks_a_family_by_name_or_layout_id() {
+        for value in ["colemak", "COLEMAK", "en-colemak", " En-Colemak "] {
+            assert_eq!(
+                LayoutChoice::parse(value),
+                Ok(LayoutChoice::Family("colemak")),
+                "{value:?}"
+            );
+        }
+        assert_eq!(LayoutChoice::parse("all"), Ok(LayoutChoice::All));
+        assert_eq!(LayoutChoice::parse("ALL"), Ok(LayoutChoice::All));
+        assert_eq!(
+            LayoutChoice::parse("en-uk"),
+            Ok(LayoutChoice::Family("qwerty"))
+        );
+        assert_eq!(
+            LayoutChoice::parse("mtgap"),
+            Ok(LayoutChoice::Family("MTGAP"))
+        );
+        assert_eq!(
+            LayoutChoice::parse("ЙЦУКЕН"),
+            Ok(LayoutChoice::Family("йцукен"))
+        );
+        for value in ["colemack", "us", "custom", "latest", ""] {
+            assert!(LayoutChoice::parse(value).is_err(), "{value:?}");
+        }
+        // No layout id names a family other than its own, so reading a
+        // value as an id first never shadows a family.
+        for info in layout::LAYOUTS {
+            if let Some(family) = layout::find_family(info.id) {
+                assert_eq!(family, info.family, "{}", info.id);
+            }
+        }
+
+        // Either spelling imports the Colemak sessions, though the latest
+        // is QWERTY.
+        let records = mixed_english("en-us");
+        for value in ["colemak", "en-colemak"] {
+            let choice = LayoutChoice::parse(value).unwrap();
+            let (_, summary) = super::replay(&records, 175.0, Language::English, choice);
+            assert_eq!(summary.family.as_deref(), Some("colemak"), "{value}");
+            assert_eq!(summary.imported, 1, "{value}");
+            assert_eq!(summary.skipped_family, 3, "{value}");
+            assert_eq!(summary.layouts, vec!["en-colemak".to_string()]);
+            let report = family_report(&summary, choice);
+            assert_eq!(report[0], "Layout family: colemak, from --layout.");
+            assert_eq!(
+                report[1],
+                "Skipped 3 sessions in other layout families (qwerty); --layout all merges them."
+            );
+            assert_eq!(report.len(), 2);
+        }
+    }
+
+    #[test]
+    fn unknown_layout_ids_are_their_own_family() {
+        let records = vec![
+            session("en-us", "2024-05-01T12:00:00.000Z"),
+            session("en-some-new-layout", "2024-05-02T12:00:00.000Z"),
+        ];
+        let (_, summary) = replay(&records, 175.0, Language::English);
+        assert_eq!(summary.family.as_deref(), Some("en-some-new-layout"));
+        assert_eq!(summary.imported, 1);
+        assert_eq!(summary.skipped_families, vec!["qwerty".to_string()]);
+    }
+
+    #[test]
+    fn nothing_imported_names_the_family() {
+        let path = Path::new("typing-data.json");
+        // Only QWERTY sessions, but Colemak asked for.
+        let records = vec![
+            session("en-us", "2024-05-01T12:00:00.000Z"),
+            session("tr-tr-q", "2024-05-02T12:00:00.000Z"),
+        ];
+        let choice = LayoutChoice::Family("colemak");
+        let (_, summary) = super::replay(&records, 175.0, Language::English, choice);
+        assert_eq!(summary.imported, 0);
+        assert_eq!(
+            nothing_imported(Language::English, path, &summary),
+            "no usable English records of layout family colemak in typing-data.json \
+             (1 skipped: other layout, 1 skipped: other layout family, 0 skipped: invalid); \
+             other families: qwerty (--layout all merges every family)"
+        );
+        // Without a family filter the message is the one it always was.
+        let (_, summary) = super::replay(&records, 175.0, Language::German, LayoutChoice::All);
+        assert_eq!(
+            nothing_imported(Language::German, path, &summary),
+            "no usable Deutsch records in typing-data.json (2 skipped: other layout, 0 skipped: invalid)"
+        );
+        let (_, summary) = replay(&records, 175.0, Language::German);
+        assert_eq!(summary.family, None);
+        assert_eq!(
+            nothing_imported(Language::German, path, &summary),
+            "no usable Deutsch records in typing-data.json (2 skipped: other layout, 0 skipped: invalid)"
+        );
+    }
+
+    #[test]
+    fn german_import_takes_german_layouts() {
+        let samples = || {
+            vec![
+                entry('e', 30, 1, 300),
+                entry('n', 20, 1, 320),
+                entry('ä', 10, 1, 400),
+                entry('ß', 5, 0, 450),
+            ]
+        };
+        let at = |layout: &str, time_stamp: &str| ExportRecord {
+            layout: layout.to_string(),
+            time_stamp: time_stamp.to_string(),
+            ..record(samples())
+        };
+        let records = vec![
+            at("de-de", "2024-05-01T12:00:00.000Z"),
+            at("en-us", "2024-05-02T12:00:00.000Z"),
+            at("de-ch", "2024-05-03T12:00:00.000Z"),
+            at("fr-ch", "2024-05-04T12:00:00.000Z"),
+        ];
+        let (saved, summary) = replay(&records, 175.0, Language::German);
+        assert_eq!(summary.family.as_deref(), Some("qwertz"));
+        assert_eq!(summary.imported, 2);
+        // {CH} French is `qwertz` too, but French: another language.
+        assert_eq!(summary.skipped_layout, 2);
+        assert_eq!(summary.skipped_family, 0);
+        assert_eq!(saved.keys[&'ä'].attempts, 20);
+        assert_eq!(saved.keys[&'ß'].attempts, 10);
+        let (_, english) = replay(&records, 175.0, Language::English);
+        assert_eq!(english.imported, 1);
     }
 }
