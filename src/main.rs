@@ -215,6 +215,9 @@ fn main() -> color_eyre::Result<()> {
     // are validated, so a pin on a force-unlocked letter survives (see
     // `App::apply_config`).
     app.apply_config(&config);
+    // `update` has no frame to measure, so it learns the terminal height
+    // here and from every resize event after (the Progress scroll clamp).
+    app.terminal_height = terminal.size()?.height;
     let rx = setup_event_channel();
 
     while app.running {

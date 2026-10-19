@@ -3,11 +3,14 @@ use std::thread;
 use std::time::Duration;
 
 use ratatui::crossterm::event::{self, Event, KeyEvent, KeyEventKind};
+use ratatui::crossterm::terminal;
 
 pub enum AppEvent {
     Key(KeyEvent),
     Tick,
-    Resize,
+    /// The terminal was resized; carries its new height in rows, as
+    /// ratatui will draw it.
+    Resize(u16),
 }
 
 pub fn setup_event_channel() -> Receiver<AppEvent> {
@@ -30,8 +33,17 @@ pub fn setup_event_channel() -> Receiver<AppEvent> {
                 if key.kind == KeyEventKind::Press && tx.send(AppEvent::Key(key)).is_err() => {
                     break;
                 }
-            Ok(Event::Resize(_, _))
-                if tx.send(AppEvent::Resize).is_err() => {
+            // The height comes from `terminal::size()`, the call ratatui
+            // sizes each frame with, not from the event: on Windows the
+            // event carries the console buffer's height, which can exceed
+            // the visible window, and the Progress scroll would then stop
+            // short of the last rows.
+            Ok(Event::Resize(_, rows))
+                if tx
+                    .send(AppEvent::Resize(
+                        terminal::size().map_or(rows, |(_, height)| height),
+                    ))
+                    .is_err() => {
                     break;
                 }
             _ => {}

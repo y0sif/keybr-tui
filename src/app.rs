@@ -191,6 +191,16 @@ pub struct App {
     pub menu_selection: usize,
     /// Selected item index in the settings screen.
     pub settings_selection: usize,
+    /// First letter row the Progress table shows, when the language has
+    /// more letters than the terminal has rows for. `update` clamps it to
+    /// `progress::scroll_limits` before every step and `render` clamps it
+    /// again, since a resize that makes room for more rows lowers the
+    /// limit between keys.
+    pub progress_scroll: usize,
+    /// Terminal height in rows, set by `main` at launch and by `update` on
+    /// every resize. Only the Progress scroll clamp reads it, since
+    /// `update` has no frame to measure.
+    pub terminal_height: u16,
 
     // --- Deferred persistence (MVU purity) ---
     /// Set by `update` when stats should be written; main's event loop
@@ -352,6 +362,9 @@ impl App {
             today_date,
             menu_selection: 0,
             settings_selection: 0,
+            progress_scroll: 0,
+            // A VT100 screen until `main` reports the real size.
+            terminal_height: 24,
             pending_stats_save: false,
             pending_config_save: false,
             pending_language_switch: None,
@@ -456,7 +469,8 @@ impl App {
     /// language row, and requests a config save so config.toml remembers
     /// the language. `running` and the menu selection carry over, so a
     /// quit queued behind the switch (agent inputs arrive in batches)
-    /// still quits, and Esc returns to the menu as the user left it.
+    /// still quits, and Esc returns to the menu as the user left it. So
+    /// does the terminal height, which only a resize would report again.
     pub fn switched_to(&self, language: Language, saved: Option<SavedStats>) -> App {
         let mut app = App::new_with_language(self.target_wpm(), self.error_mode, saved, language);
         let config = self.to_config();
@@ -473,6 +487,7 @@ impl App {
         app.screen = AppScreen::Settings;
         app.settings_selection = LANGUAGE_ROW;
         app.menu_selection = self.menu_selection;
+        app.terminal_height = self.terminal_height;
         app.pending_config_save = true;
         app
     }
@@ -1689,12 +1704,14 @@ mod tests {
         en.screen = AppScreen::Settings;
         en.settings_selection = LANGUAGE_ROW;
         en.menu_selection = 2;
+        en.terminal_height = 50;
 
         let tr = en.switched_to(Language::Turkish, None);
         assert!(tr.running);
         assert_eq!(tr.screen, AppScreen::Settings);
         assert_eq!(tr.settings_selection, LANGUAGE_ROW);
         assert_eq!(tr.menu_selection, 2);
+        assert_eq!(tr.terminal_height, 50, "no resize says it again");
         assert!(
             tr.pending_config_save,
             "config.toml must remember the language"

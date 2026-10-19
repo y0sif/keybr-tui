@@ -12,6 +12,7 @@ use taria_ratatui::to_crossterm_key;
 
 use crate::app::{App, AppScreen, ErrorMode};
 use crate::components::menu::MENU_ITEMS;
+use crate::components::progress;
 use crate::components::settings::{LANGUAGE_ROW, SETTINGS_COUNT};
 use crate::engine::filter::FocusRule;
 use crate::engine::Language;
@@ -50,7 +51,7 @@ pub fn update(app: &mut App, event: AppEvent) {
     match event {
         AppEvent::Key(key) => handle_key(app, key),
         AppEvent::Tick => {}
-        AppEvent::Resize => {}
+        AppEvent::Resize(height) => app.terminal_height = height,
     }
 }
 
@@ -273,7 +274,8 @@ fn handle_menu_key(app: &mut App, key: KeyEvent) {
                     app.start_next_lesson();
                 }
                 1 => {
-                    // View Progress
+                    // View Progress, from the top of the table
+                    app.progress_scroll = 0;
                     app.screen = AppScreen::Progress;
                 }
                 2 => {
@@ -427,9 +429,24 @@ fn handle_typed_char(app: &mut App, typed: char) {
 
 // --- Progress screen ---
 
+/// Esc returns to the menu; the other keys scroll a letter table taller
+/// than the terminal. Every step starts from the offset clamped to what
+/// this terminal shows, so the first Up after End, or after a resize that
+/// grew the table, already moves the view.
 fn handle_progress_key(app: &mut App, key: KeyEvent) {
-    if key.code == KeyCode::Esc {
-        app.screen = AppScreen::Menu;
+    use KeyCode::*;
+
+    let (page, max) = progress::scroll_limits(app);
+    let offset = app.progress_scroll.min(max);
+    match key.code {
+        Esc => app.screen = AppScreen::Menu,
+        Up => app.progress_scroll = offset.saturating_sub(1),
+        Down => app.progress_scroll = (offset + 1).min(max),
+        PageUp => app.progress_scroll = offset.saturating_sub(page),
+        PageDown => app.progress_scroll = (offset + page).min(max),
+        Home => app.progress_scroll = 0,
+        End => app.progress_scroll = max,
+        _ => {}
     }
 }
 
@@ -884,6 +901,116 @@ mod tests {
         app.screen = AppScreen::Progress;
         update(&mut app, AppEvent::Key(make_key(KeyCode::Esc)));
         assert_eq!(app.screen, AppScreen::Menu);
+    }
+
+    // --- Progress screen scrolling ---
+
+    /// German's 30 letters on the Progress screen of a terminal `height`
+    /// rows tall. At 30 rows, 2 title and 3 footer rows leave a 25-row
+    /// table; the header and rule take 2 and the "more" line 1, so 22
+    /// letters show and the last offset is 30 - 22 = 8. At 20 rows, 12
+    /// show and the last offset is 18.
+    fn app_on_long_progress(height: u16) -> App {
+        let mut app =
+            App::new_with_language(35, ErrorMode::ForgiveMistakes, None, Language::German);
+        assert_eq!(app.language.unlock_order().len(), 30);
+        app.screen = AppScreen::Progress;
+        app.terminal_height = height;
+        app
+    }
+
+    fn press(app: &mut App, code: KeyCode) {
+        update(app, AppEvent::Key(make_key(code)));
+    }
+
+    #[test]
+    fn progress_arrows_scroll_one_row() {
+        let mut app = app_on_long_progress(30);
+        assert_eq!(app.progress_scroll, 0);
+        press(&mut app, KeyCode::Down);
+        press(&mut app, KeyCode::Down);
+        assert_eq!(app.progress_scroll, 2);
+        press(&mut app, KeyCode::Up);
+        assert_eq!(app.progress_scroll, 1);
+        assert_eq!(app.screen, AppScreen::Progress);
+    }
+
+    #[test]
+    fn progress_scroll_stops_at_both_ends() {
+        let mut app = app_on_long_progress(30);
+        press(&mut app, KeyCode::Up);
+        press(&mut app, KeyCode::PageUp);
+        assert_eq!(app.progress_scroll, 0);
+
+        press(&mut app, KeyCode::End);
+        assert_eq!(app.progress_scroll, 8);
+        press(&mut app, KeyCode::Down);
+        press(&mut app, KeyCode::PageDown);
+        assert_eq!(app.progress_scroll, 8);
+
+        press(&mut app, KeyCode::Home);
+        assert_eq!(app.progress_scroll, 0);
+    }
+
+    #[test]
+    fn progress_page_keys_move_a_page() {
+        let mut app = app_on_long_progress(20);
+        press(&mut app, KeyCode::PageDown);
+        assert_eq!(app.progress_scroll, 12);
+        press(&mut app, KeyCode::PageDown);
+        assert_eq!(app.progress_scroll, 18, "clamped at the last letter");
+        press(&mut app, KeyCode::PageUp);
+        assert_eq!(app.progress_scroll, 6);
+        press(&mut app, KeyCode::PageUp);
+        assert_eq!(app.progress_scroll, 0);
+    }
+
+    /// No dead presses at the bottom: the first Up after End moves, even
+    /// when a resize to a taller terminal has since lowered the limit.
+    #[test]
+    fn progress_up_after_end_moves_at_once() {
+        let mut app = app_on_long_progress(30);
+        press(&mut app, KeyCode::End);
+        press(&mut app, KeyCode::Up);
+        assert_eq!(app.progress_scroll, 7);
+
+        let mut app = app_on_long_progress(20);
+        press(&mut app, KeyCode::End);
+        assert_eq!(app.progress_scroll, 18);
+        update(&mut app, AppEvent::Resize(30));
+        press(&mut app, KeyCode::Up);
+        assert_eq!(app.progress_scroll, 7);
+    }
+
+    #[test]
+    fn progress_list_that_fits_does_not_scroll() {
+        let mut app = App::new();
+        app.screen = AppScreen::Progress;
+        app.terminal_height = 40;
+        for code in [KeyCode::Down, KeyCode::PageDown, KeyCode::End] {
+            press(&mut app, code);
+            assert_eq!(app.progress_scroll, 0, "{code:?}");
+        }
+    }
+
+    #[test]
+    fn opening_progress_starts_at_the_top() {
+        let mut app = app_on_long_progress(30);
+        press(&mut app, KeyCode::End);
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.screen, AppScreen::Menu);
+
+        app.menu_selection = 1;
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.screen, AppScreen::Progress);
+        assert_eq!(app.progress_scroll, 0);
+    }
+
+    #[test]
+    fn resize_records_the_terminal_height() {
+        let mut app = App::new();
+        update(&mut app, AppEvent::Resize(42));
+        assert_eq!(app.terminal_height, 42);
     }
 
     #[test]
