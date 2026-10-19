@@ -30,7 +30,7 @@ Per-key stats and session history live under your platform's XDG data directory,
 
 ## Can I reset my stats?
 
-Yes. `keybr-tui --reset` deletes the stats file of your practice language only, keeping your config and the other languages' stats, and then opens the app on a fresh profile. To clear the stats of every language, delete the data directory (`keybr-tui --data-dir` prints it).
+Yes. `keybr-tui --reset` deletes the stats file of your practice language only, keeping your config and the other languages' stats, and then opens the app on a fresh profile. To clear the stats of every language, delete the `stats*.json` files in the data directory (`keybr-tui --data-dir` prints it).
 
 ## What terminal emulators are supported?
 

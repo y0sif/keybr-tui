@@ -43,7 +43,8 @@ struct Cli {
     #[arg(long)]
     error_mode: Option<String>,
 
-    /// Delete saved stats and start fresh (keeps config).
+    /// Delete the practice language's saved stats and start fresh (keeps
+    /// config and other languages' stats).
     #[arg(long)]
     reset: bool,
 
