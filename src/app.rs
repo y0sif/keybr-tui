@@ -144,6 +144,14 @@ pub struct App {
     /// letter pin and a pattern pin cannot coexist by construction rather
     /// than by convention.
     pub manual_focus: Option<FocusRule>,
+    /// A `focus_letter` from config.toml that this session cannot use but
+    /// another language may have set, since every language shares the
+    /// key. Never applied; held as read so `to_config` writes it back
+    /// instead of erasing it. Set by `set_manual_focus_from_config`, and
+    /// cleared when the user picks a pin in Settings.
+    pub foreign_focus_letter: Option<char>,
+    /// Same as `foreign_focus_letter`, for `focus_pattern`.
+    pub foreign_focus_pattern: Option<String>,
     /// The combination drills the settings pattern row may offer right
     /// now, derived from the unlocked alphabet.
     ///
@@ -326,6 +334,8 @@ impl App {
             daily_goal_minutes: 30,
             alphabet_size: 0.0,
             manual_focus: None,
+            foreign_focus_letter: None,
+            foreign_focus_pattern: None,
             available_patterns,
             available_patterns_for_keys,
             today_seconds_practiced,
@@ -447,18 +457,50 @@ impl App {
     /// unless the letter is unlocked. `effective_focus` keeps its own
     /// guard as defense in depth for pins set at runtime.
     ///
+    /// The exception is an unusable pin another language may have set
+    /// (see `is_foreign_pin`). It is not applied either, but is kept in
+    /// `foreign_focus_letter` / `foreign_focus_pattern` exactly as read,
+    /// so a session in this language does not erase it from the file.
+    ///
     /// Callers must run `run_scheduler_update` with the final
     /// `alphabet_size` applied *before* calling this, so letters
     /// force-unlocked by that setting count as valid pins and the stored
     /// drill list this validates against is current.
     pub fn set_manual_focus_from_config(&mut self, pattern: Option<&str>, letter: Option<char>) {
-        let from_pattern = pattern
-            .and_then(FocusRule::from_config)
-            .filter(|rule| self.available_patterns().contains(rule));
-        let from_letter = letter
-            .map(|c| FocusRule::Key(self.language.lower(c)))
+        let stored_pattern = pattern.and_then(FocusRule::from_config);
+        let from_pattern = stored_pattern.filter(|rule| self.available_patterns().contains(rule));
+        let stored_letter = letter.map(|c| self.language.lower(c));
+        let from_letter = stored_letter
+            .map(FocusRule::Key)
             .filter(|rule| self.focus_letters_unlocked(rule));
         self.manual_focus = from_pattern.or(from_letter);
+
+        let foreign_pattern = from_pattern.is_none()
+            && stored_pattern
+                .is_some_and(|rule| self.is_foreign_pin(|l| l.focus_patterns().contains(&rule)));
+        self.foreign_focus_pattern = pattern.filter(|_| foreign_pattern).map(str::to_string);
+        let foreign_letter = from_letter.is_none()
+            && stored_letter.is_some_and(|c| self.is_foreign_pin(|l| l.is_letter(c)));
+        self.foreign_focus_letter = letter.filter(|_| foreign_letter);
+    }
+
+    /// True when a config pin this session cannot use may have been set
+    /// in another language, so it must stay in config.toml. `owns` says
+    /// whether a language could have set it: the letter is in its
+    /// alphabet, or the drill is one it offers.
+    ///
+    /// The pin keys record no language, so this goes by who could own the
+    /// pin. English keeps its rule from before languages existed: a letter
+    /// or drill of its own that it cannot use yet (locked, or a drill short
+    /// of words) is dropped, and only a pin it could never have set, like
+    /// Turkish `ş`, is kept. Any other language keeps every pin another
+    /// language could own, since an English pin on a letter they share,
+    /// still locked here, looks exactly like one of its own.
+    fn is_foreign_pin(&self, owns: impl Fn(Language) -> bool) -> bool {
+        let others_own = Language::ALL
+            .iter()
+            .any(|&other| other != self.language && owns(other));
+        others_own && (self.language != Language::English || !owns(self.language))
     }
 
     /// Target WPM for display (WPM = CPM / 5).
@@ -657,6 +699,10 @@ impl App {
             Some(rule) => (None, Some(rule.config_value())),
             None => (None, None),
         };
+        // A pin another language set goes back exactly as it was read
+        // (see `set_manual_focus_from_config`).
+        let focus_letter = focus_letter.or(self.foreign_focus_letter);
+        let focus_pattern = focus_pattern.or_else(|| self.foreign_focus_pattern.clone());
 
         Config {
             target_wpm: self.target_wpm(),
@@ -1266,5 +1312,62 @@ mod tests {
         );
         assert!(restored.per_key_stats.contains_key(&'ş'));
         assert_eq!(restored.scheduler.active_keys, app.scheduler.active_keys);
+    }
+
+    #[test]
+    fn english_pins_survive_a_turkish_session_config_save() {
+        // Every language shares the pin keys. Turkish cannot use an
+        // English pin on 'l' (locked here), on 'q' (not a Turkish letter)
+        // or on an English drill, so it applies none of them, but its
+        // next config save must leave each one in the file.
+        let mut tr =
+            App::new_with_language(35, ErrorMode::ForgiveMistakes, None, Language::Turkish);
+        assert!(!tr.scheduler.active_keys.contains(&'l'));
+        for (pattern, letter) in [(None, Some('l')), (None, Some('q')), (Some("-tion"), None)] {
+            tr.set_manual_focus_from_config(pattern, letter);
+            assert_eq!(tr.manual_focus, None, "{pattern:?} {letter:?}");
+            let cfg = tr.to_config();
+            assert_eq!(cfg.focus_letter, letter);
+            assert_eq!(cfg.focus_pattern.as_deref(), pattern);
+            assert_eq!(cfg.language, "tr");
+        }
+
+        // Back in English, 'l' is a starter letter and pins again.
+        tr.set_manual_focus_from_config(None, Some('l'));
+        let cfg = tr.to_config();
+        let mut en = App::new();
+        en.set_manual_focus_from_config(cfg.focus_pattern.as_deref(), cfg.focus_letter);
+        assert_eq!(en.manual_focus, Some(FocusRule::Key('l')));
+    }
+
+    #[test]
+    fn a_turkish_letter_pin_survives_an_english_session_config_save() {
+        let mut app = App::new();
+        app.set_manual_focus_from_config(None, Some('ş'));
+        assert_eq!(app.manual_focus, None, "'ş' is not an English letter");
+        assert!(!app.focus_is_pinned());
+        assert_eq!(app.to_config().focus_letter, Some('ş'));
+    }
+
+    #[test]
+    fn english_still_erases_pins_it_cannot_use() {
+        // The English-only path is unchanged: a pin on a locked English
+        // letter, an English drill short of letters, junk, and a letter no
+        // supported language has are dropped, and the next save erases
+        // them, exactly as before languages existed.
+        let mut app = App::new();
+        for (pattern, letter) in [
+            (None, Some('z')),
+            (Some("-tion"), None),
+            (Some("banana"), None),
+            (None, Some('1')),
+            (None, Some('é')),
+        ] {
+            app.set_manual_focus_from_config(pattern, letter);
+            assert_eq!(app.manual_focus, None, "{pattern:?} {letter:?}");
+            let cfg = app.to_config();
+            assert_eq!(cfg.focus_letter, None, "{pattern:?} {letter:?}");
+            assert_eq!(cfg.focus_pattern, None, "{pattern:?} {letter:?}");
+        }
     }
 }

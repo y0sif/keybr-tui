@@ -55,7 +55,6 @@ const TR_WORDLIST: &str = include_str!("../../data/wordlist-tr.txt");
 
 impl Language {
     /// Every supported language, in the order the UI lists them.
-    #[allow(dead_code)]
     pub const ALL: &'static [Language] = &[Language::English, Language::Turkish];
 
     /// ISO 639-1 code: the config value and keybr.com's language id.
