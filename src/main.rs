@@ -22,6 +22,7 @@ use taria_ratatui::{InputStatus, TariaLayer};
 
 use app::{App, ErrorMode};
 use config::{Config, ErrorModeSerde};
+use engine::Language;
 use events::setup_event_channel;
 use persistence::SavedStats;
 use ui::view;
@@ -57,16 +58,68 @@ struct Cli {
     /// With --import: replace existing stats (a .bak backup is written).
     #[arg(long)]
     force: bool,
+
+    /// Practice language: "en" (default) or "tr". Saved to config.toml, so
+    /// later runs keep it. Each language keeps its own stats.
+    #[arg(long, value_name = "CODE", value_parser = parse_language)]
+    language: Option<Language>,
+}
+
+/// Clap parser for `--language`: an unknown code is rejected on the spot,
+/// with the usual clap error, since the user is right there to fix it.
+fn parse_language(code: &str) -> Result<Language, String> {
+    Language::from_code(code).ok_or_else(|| "unknown language (supported: en, tr)".to_string())
+}
+
+/// Resolve the practice language: `--language` wins over the config file.
+/// An unknown code in the config file is only a warning, so a typo there
+/// never stops the app from starting.
+///
+/// Saves nothing: `--data-dir` and `--import` use the language too, and a
+/// failed import must not switch the config to it. `main` writes it back
+/// (see `remember_language`) only after a successful import or once it is
+/// about to launch the TUI.
+fn resolve_language(cli: Option<Language>, config: &Config) -> Language {
+    if let Some(language) = cli {
+        return language;
+    }
+    Language::from_code(&config.language).unwrap_or_else(|| {
+        eprintln!(
+            "Warning: unknown language '{}' in config.toml. Using English.",
+            config.language
+        );
+        Language::English
+    })
+}
+
+/// The language code to write back to config.toml so that
+/// `keybr-tui --language tr` once is enough: `--language`'s code, unless
+/// the config already holds it (or the flag is absent).
+fn language_to_save(cli: Option<Language>, config: &Config) -> Option<&'static str> {
+    cli.map(Language::code)
+        .filter(|&code| config.language != code)
+}
+
+/// Write `--language` back to config.toml (see `language_to_save`).
+fn remember_language(cli: Option<Language>, config: &mut Config) {
+    if let Some(code) = language_to_save(cli, config) {
+        config.language = code.to_string();
+        if let Err(e) = config.save() {
+            eprintln!("Warning: failed to save language to config: {e}");
+        }
+    }
 }
 
 fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
 
     let cli = Cli::parse();
+    let mut config = Config::load();
+    let language = resolve_language(cli.language, &config);
 
     // --data-dir: print path and exit
     if cli.data_dir {
-        match SavedStats::path() {
+        match SavedStats::path(language) {
             Some(p) => {
                 if let Some(dir) = p.parent() {
                     println!("{}", dir.display());
@@ -79,23 +132,27 @@ fn main() -> color_eyre::Result<()> {
 
     // --import: replay a keybr.com export into stats.json and exit
     if let Some(ref import_path) = cli.import {
-        let config = Config::load();
         let target_wpm = cli.target_wpm.unwrap_or(config.target_wpm);
         let target_cpm = target_wpm as f64 * 5.0;
-        return import::run_import(import_path, target_cpm, cli.force);
+        import::run_import(import_path, target_cpm, cli.force, language)?;
+        // Remembered only once the import succeeded, so the next plain
+        // launch opens the language just imported.
+        remember_language(cli.language, &mut config);
+        return Ok(());
     }
+
+    // --language is also remembered by a run that goes on to the TUI
+    // (including --reset), never by --data-dir.
+    remember_language(cli.language, &mut config);
 
     // --reset: delete stats file and continue fresh
     if cli.reset {
-        match SavedStats::delete() {
+        match SavedStats::delete(language) {
             Ok(true) => println!("Stats reset. Starting fresh."),
             Ok(false) => println!("No stats file found. Starting fresh."),
             Err(e) => eprintln!("Warning: could not delete stats: {e}"),
         }
     }
-
-    // Load config from disk
-    let config = Config::load();
 
     // Determine settings: CLI args override config file
     let target_wpm = cli.target_wpm.unwrap_or(config.target_wpm);
@@ -113,7 +170,11 @@ fn main() -> color_eyre::Result<()> {
     };
 
     // Load saved stats (unless --reset was used)
-    let saved_stats = if cli.reset { None } else { SavedStats::load() };
+    let saved_stats = if cli.reset {
+        None
+    } else {
+        SavedStats::load(language)
+    };
 
     // Bind the taria layer (agent accessibility) before entering the
     // alternate screen, so its report lands in the primary buffer. Unix
@@ -123,7 +184,7 @@ fn main() -> color_eyre::Result<()> {
 
     let mut terminal = tui::init()?;
 
-    let mut app = App::new_with_state(target_wpm, error_mode, saved_stats);
+    let mut app = App::new_with_language(target_wpm, error_mode, saved_stats, language);
     app.fragment_length = config.fragment_length;
     app.natural_words = config.natural_words;
     app.daily_goal_minutes = config.daily_goal_minutes;
@@ -250,5 +311,40 @@ fn report_taria_counters(layer: &TariaLayer) {
             "keybr-tui: lost the answer to {acks} agent input(s): the bridge read them slower \
              than the app answered, so those agent calls timed out instead"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config_with(language: &str) -> Config {
+        Config {
+            language: language.to_string(),
+            ..Config::default()
+        }
+    }
+
+    #[test]
+    fn language_flag_wins_over_config() {
+        let tr = Language::Turkish;
+        assert_eq!(resolve_language(Some(tr), &config_with("en")), tr);
+        assert_eq!(resolve_language(None, &config_with("tr")), tr);
+        // An unknown code in the file only warns and falls back.
+        assert_eq!(
+            resolve_language(None, &config_with("xx")),
+            Language::English
+        );
+    }
+
+    #[test]
+    fn language_is_saved_only_when_the_flag_changes_it() {
+        let (en, tr) = (Language::English, Language::Turkish);
+        assert_eq!(language_to_save(Some(tr), &config_with("en")), Some("tr"));
+        assert_eq!(language_to_save(Some(tr), &config_with("tr")), None);
+        assert_eq!(language_to_save(Some(en), &config_with("en")), None);
+        // The flag replaces a code this build does not know.
+        assert_eq!(language_to_save(Some(en), &config_with("xx")), Some("en"));
+        assert_eq!(language_to_save(None, &config_with("tr")), None);
     }
 }

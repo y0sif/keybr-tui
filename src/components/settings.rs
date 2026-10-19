@@ -20,7 +20,7 @@ pub const SETTINGS_COUNT: usize = 6;
 /// string the human sees, from one definition.
 pub(crate) fn focus_letter_value(app: &App) -> String {
     match app.manual_focus {
-        Some(FocusRule::Key(c)) => c.to_ascii_uppercase().to_string(),
+        Some(FocusRule::Key(c)) => app.language.upper(c),
         _ => "Auto".to_string(),
     }
 }
@@ -41,7 +41,7 @@ pub(crate) fn focus_pattern_value(app: &App) -> String {
         Some(rule @ (FocusRule::Contains(_) | FocusRule::Suffix(_)))
             if app.available_patterns().contains(&rule) =>
         {
-            rule.label()
+            rule.label_in(app.language)
         }
         _ if app.available_patterns().is_empty() => "None yet".to_string(),
         _ => "Off".to_string(),
@@ -158,7 +158,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     } else {
         "  "
     };
-    let extra = crate::engine::scheduler::forced_extra_letters(app.alphabet_size);
+    let extra = crate::engine::scheduler::forced_extra_letters(app.language, app.alphabet_size);
     lines.push(Line::from(vec![
         Span::styled(format!("{}Alphabet size       ", alpha_marker), alpha_style),
         Span::styled(format!("[  +{extra} letters  ]"), alpha_style),

@@ -23,6 +23,14 @@ fn default_alphabet_size() -> f64 {
     0.0
 }
 
+fn default_language() -> String {
+    "en".to_string()
+}
+
+fn is_default_language(code: &String) -> bool {
+    code == "en"
+}
+
 /// Deserialize `alphabet_size`, clamping out-of-range values to [0.0, 1.0]
 /// (non-finite values fall back to the default of 0.0).
 fn de_alphabet_size<'de, D>(deserializer: D) -> Result<f64, D::Error>
@@ -100,6 +108,16 @@ pub struct Config {
     /// `focus_letter`: TOML cannot represent `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub focus_pattern: Option<String>,
+
+    /// Practice language code (`"en"`, `"tr"`). Kept as the raw string so
+    /// a typo or a language this build does not know costs only the
+    /// language (with a warning in `main`), never the rest of the file.
+    /// Omitted when English, so English users' files stay byte-identical.
+    #[serde(
+        default = "default_language",
+        skip_serializing_if = "is_default_language"
+    )]
+    pub language: String,
 }
 
 impl Default for Config {
@@ -113,6 +131,7 @@ impl Default for Config {
             alphabet_size: default_alphabet_size(),
             focus_letter: None,
             focus_pattern: None,
+            language: default_language(),
         }
     }
 }
@@ -190,6 +209,7 @@ mod tests {
             alphabet_size: 0.35,
             focus_letter: Some('c'),
             focus_pattern: None,
+            language: "en".to_string(),
         };
         let serialized = toml::to_string_pretty(&cfg).unwrap();
         let deserialized: Config = toml::from_str(&serialized).unwrap();
@@ -371,5 +391,27 @@ mod tests {
     fn config_path_is_some() {
         // On most platforms this should succeed
         assert!(Config::path().is_some());
+    }
+
+    #[test]
+    fn language_defaults_to_english_and_is_omitted() {
+        let cfg: Config = toml::from_str("target_wpm = 40").unwrap();
+        assert_eq!(cfg.language, "en");
+        let out = toml::to_string_pretty(&Config::default()).unwrap();
+        assert!(!out.contains("language"), "{out}");
+    }
+
+    #[test]
+    fn turkish_language_round_trips() {
+        let cfg = Config {
+            language: "tr".to_string(),
+            focus_letter: Some('ş'),
+            ..Config::default()
+        };
+        let out = toml::to_string_pretty(&cfg).unwrap();
+        assert!(out.contains("language = \"tr\""), "{out}");
+        let back: Config = toml::from_str(&out).unwrap();
+        assert_eq!(back.language, "tr");
+        assert_eq!(back.focus_letter, Some('ş'));
     }
 }

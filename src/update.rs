@@ -460,7 +460,17 @@ fn cycle_manual_focus(app: &mut App, forward: bool) {
         _ => None,
     });
     let next = cycle_index(current, keys.len(), forward);
-    app.manual_focus = (next > 0).then(|| FocusRule::Key(keys[next - 1]));
+    let picked = (next > 0).then(|| FocusRule::Key(keys[next - 1]));
+    pin_focus(app, picked);
+}
+
+/// Set the manual focus pin from Settings. The user's pick replaces
+/// whatever pin config.toml held, including one kept aside for another
+/// language (see `App::set_manual_focus_from_config`).
+fn pin_focus(app: &mut App, rule: Option<FocusRule>) {
+    app.manual_focus = rule;
+    app.foreign_focus_letter = None;
+    app.foreign_focus_pattern = None;
 }
 
 /// Step the manual focus pin through `[Off] + available_patterns()`,
@@ -486,7 +496,7 @@ fn cycle_manual_pattern(app: &mut App, forward: bool) -> bool {
         .and_then(|rule| patterns.iter().position(|&p| p == rule));
     let next = cycle_index(current, patterns.len(), forward);
     let picked = (next > 0).then(|| patterns[next - 1]);
-    app.manual_focus = picked;
+    pin_focus(app, picked);
     true
 }
 
@@ -1067,6 +1077,33 @@ mod tests {
             !app.pending_config_save,
             "a row with nothing to offer must not mark the config dirty"
         );
+    }
+
+    #[test]
+    fn picking_a_pin_replaces_one_kept_for_another_language() {
+        // Turkish keeps English pins it cannot use in the config file.
+        // Its pattern row offers nothing and leaves them alone; picking a
+        // letter is a new pin and replaces them.
+        let mut app = App::new_with_language(
+            35,
+            ErrorMode::ForgiveMistakes,
+            None,
+            crate::engine::Language::Turkish,
+        );
+        app.set_manual_focus_from_config(Some("-tion"), Some('q'));
+        app.screen = AppScreen::Settings;
+        app.settings_selection = 5;
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Right)));
+        let cfg = app.to_config();
+        assert_eq!(cfg.focus_pattern.as_deref(), Some("-tion"));
+        assert_eq!(cfg.focus_letter, Some('q'));
+
+        app.settings_selection = 4;
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Right)));
+        assert_eq!(app.manual_focus, Some(FocusRule::Key('a')));
+        let cfg = app.to_config();
+        assert_eq!(cfg.focus_letter, Some('a'));
+        assert_eq!(cfg.focus_pattern, None);
     }
 
     // --- Deferred persistence: update must only raise flags, never write ---

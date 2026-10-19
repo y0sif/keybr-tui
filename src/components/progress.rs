@@ -7,7 +7,6 @@ use ratatui::{
 };
 
 use crate::app::App;
-use crate::engine::scheduler::UNLOCK_ORDER;
 use crate::metrics::KeyStats;
 
 // Column widths.
@@ -152,7 +151,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         .effective_focus()
         .map(|rule| rule.letters())
         .unwrap_or_default();
-    for &key in UNLOCK_ORDER {
+    for &key in app.language.unlock_order() {
         let is_active = active_set.contains(&key);
         let is_focused = focus_letters.contains(&key);
 

@@ -7,12 +7,7 @@ use ratatui::{
 };
 
 use crate::app::App;
-
-/// All 26 ASCII lowercase letters in `a-z` order.
-const ALPHABET: &[char] = &[
-    'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's',
-    't', 'u', 'v', 'w', 'x', 'y', 'z',
-];
+use crate::engine::Language;
 
 /// Map a key's best confidence (and unlock state) to a gradient color.
 ///
@@ -50,6 +45,7 @@ pub const TILE_WIDTH: u16 = 3;
 /// heatmap only — the typing area still defers to the terminal
 /// background per the brand rule.
 pub fn key_tile_spans(
+    language: Language,
     key: char,
     best_conf: f64,
     is_active: bool,
@@ -57,7 +53,7 @@ pub fn key_tile_spans(
     is_pinned: bool,
 ) -> Vec<Span<'static>> {
     let bg = color_for(best_conf, is_active);
-    let letter = key.to_ascii_uppercase().to_string();
+    let letter = language.upper(key);
     // White foreground reads well against every ANSI color used by
     // `color_for` (green, light-green, yellow, light-red, red, dark-gray).
     let mut style = Style::default().bg(bg).fg(Color::White);
@@ -96,9 +92,11 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     // Each key takes 3 cells (space + letter + space). Adjacent tiles
     // share no gap so the heatmap reads as one continuous colored band,
     // matching keybr.com's tile grid.
-    let mut spans: Vec<Span<'static>> = Vec::with_capacity(ALPHABET.len() * TILE_WIDTH as usize);
+    // One tile per letter of the practice language, in alphabetical order.
+    let letters = app.language.letters();
+    let mut spans: Vec<Span<'static>> = Vec::with_capacity(letters.len() * TILE_WIDTH as usize);
 
-    for &key in ALPHABET.iter() {
+    for &key in letters {
         let is_active = active_set.contains(&key);
         let best_conf = app
             .per_key_stats
@@ -108,6 +106,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         let is_focused = focus_letters.contains(&key);
 
         spans.extend(key_tile_spans(
+            app.language,
             key,
             best_conf,
             is_active,
@@ -116,10 +115,11 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         ));
     }
 
-    // 26 letters × 3 cells = 78 chars; center when it fits, otherwise
+    // 26 letters × 3 cells = 78 chars (29 × 3 = 87 for Turkish); center
+    // when it fits, otherwise
     // left-align so the leading tiles stay visible if the terminal is
     // narrow (we'd rather show ENIAR than nothing).
-    let row_width: u16 = ALPHABET.len() as u16 * TILE_WIDTH;
+    let row_width: u16 = letters.len() as u16 * TILE_WIDTH;
     let alignment = if area.width >= row_width {
         Alignment::Center
     } else {
@@ -161,7 +161,7 @@ mod tests {
 
     #[test]
     fn key_tile_spans_emits_three_cells_with_letter_centered() {
-        let spans = key_tile_spans('e', 1.0, true, false, false);
+        let spans = key_tile_spans(Language::English, 'e', 1.0, true, false, false);
         assert_eq!(spans.len(), 3);
         assert_eq!(spans[0].content, " ");
         assert_eq!(spans[1].content, "E");
@@ -173,7 +173,7 @@ mod tests {
 
     #[test]
     fn locked_tile_uses_dark_gray_bg() {
-        let spans = key_tile_spans('z', 0.0, false, false, false);
+        let spans = key_tile_spans(Language::English, 'z', 0.0, false, false, false);
         assert_eq!(spans[0].style.bg, Some(Color::DarkGray));
         assert_eq!(spans[1].style.bg, Some(Color::DarkGray));
         assert_eq!(spans[2].style.bg, Some(Color::DarkGray));
@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn focused_tile_is_bold_and_underlined() {
-        let spans = key_tile_spans('e', 1.0, true, true, false);
+        let spans = key_tile_spans(Language::English, 'e', 1.0, true, true, false);
         let modifiers = spans[1].style.add_modifier;
         assert!(modifiers.contains(Modifier::BOLD));
         assert!(modifiers.contains(Modifier::UNDERLINED));
@@ -193,10 +193,59 @@ mod tests {
 
     #[test]
     fn pinned_tile_adds_reversed_over_focus_styling() {
-        let spans = key_tile_spans('e', 1.0, true, true, true);
+        let spans = key_tile_spans(Language::English, 'e', 1.0, true, true, true);
         let modifiers = spans[1].style.add_modifier;
         assert!(modifiers.contains(Modifier::BOLD));
         assert!(modifiers.contains(Modifier::UNDERLINED));
         assert!(modifiers.contains(Modifier::REVERSED));
+    }
+
+    #[test]
+    fn turkish_tiles_use_turkish_uppercase() {
+        let text = |spans: Vec<Span<'static>>| spans[1].content.to_string();
+        assert_eq!(
+            text(key_tile_spans(
+                Language::Turkish,
+                'i',
+                1.0,
+                true,
+                false,
+                false
+            )),
+            "İ"
+        );
+        assert_eq!(
+            text(key_tile_spans(
+                Language::Turkish,
+                'ı',
+                1.0,
+                true,
+                false,
+                false
+            )),
+            "I"
+        );
+        assert_eq!(
+            text(key_tile_spans(
+                Language::Turkish,
+                'ş',
+                1.0,
+                true,
+                false,
+                false
+            )),
+            "Ş"
+        );
+        assert_eq!(
+            text(key_tile_spans(
+                Language::English,
+                'i',
+                1.0,
+                true,
+                false,
+                false
+            )),
+            "I"
+        );
     }
 }

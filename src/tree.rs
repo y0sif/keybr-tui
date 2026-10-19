@@ -19,7 +19,7 @@ use crate::app::{App, AppScreen, ErrorMode};
 use crate::components::menu::MENU_ITEMS;
 use crate::components::progress::tier_for;
 use crate::components::settings::{focus_letter_value, focus_pattern_value, SETTINGS_COUNT};
-use crate::engine::scheduler::{forced_extra_letters, UNLOCK_ORDER};
+use crate::engine::scheduler::forced_extra_letters;
 
 /// Id space for the main menu's rows: `menu-start-practice`, and so on.
 ///
@@ -186,7 +186,8 @@ fn typing_nodes(app: &App) -> Vec<Node> {
 /// are still locked.
 fn heatmap_value(app: &App) -> String {
     let mut parts: Vec<String> = Vec::new();
-    for &key in UNLOCK_ORDER.iter() {
+    let order = app.language.unlock_order();
+    for &key in order.iter() {
         if !app.scheduler.active_keys.contains(&key) {
             continue;
         }
@@ -197,9 +198,7 @@ fn heatmap_value(app: &App) -> String {
             .unwrap_or(0.0);
         parts.push(format!("{key} {:.0}%", conf * 100.0));
     }
-    let locked = UNLOCK_ORDER
-        .len()
-        .saturating_sub(app.scheduler.active_keys.len());
+    let locked = order.len().saturating_sub(app.scheduler.active_keys.len());
     if parts.is_empty() {
         return format!("no letters unlocked, {locked} locked");
     }
@@ -207,7 +206,7 @@ fn heatmap_value(app: &App) -> String {
 }
 
 fn progress_nodes(app: &App) -> Vec<Node> {
-    let rows = UNLOCK_ORDER.iter().map(|&key| {
+    let rows = app.language.unlock_order().iter().map(|&key| {
         let is_active = app.scheduler.active_keys.contains(&key);
         let stats = app.per_key_stats.get(&key);
         let tier = tier_for(is_active, stats, app.target_cpm);
@@ -245,7 +244,10 @@ fn settings_nodes(app: &App) -> Vec<Node> {
         ("Fragment Length", app.fragment_length.to_string()),
         (
             "Alphabet size",
-            format!("+{} letters", forced_extra_letters(app.alphabet_size)),
+            format!(
+                "+{} letters",
+                forced_extra_letters(app.language, app.alphabet_size)
+            ),
         ),
         ("Focus letter", focus_letter_value(app)),
         ("Focus pattern", focus_pattern_value(app)),
@@ -270,6 +272,7 @@ fn settings_nodes(app: &App) -> Vec<Node> {
 mod tests {
     use super::*;
     use crate::engine::filter::FocusRule;
+    use crate::engine::scheduler::UNLOCK_ORDER;
 
     fn count_focused(nodes: &[Node]) -> usize {
         nodes

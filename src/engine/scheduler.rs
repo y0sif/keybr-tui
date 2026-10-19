@@ -1,38 +1,41 @@
 use std::collections::HashMap;
 
+use crate::engine::language::Language;
 use crate::metrics::KeyStats;
 
-/// Fixed letter progression order, mirroring keybr.com.
+/// English letter progression order, mirroring keybr.com. Kept as a named
+/// constant because the English tests are written against it; other code
+/// asks the scheduler's language (`Language::unlock_order`).
 ///
-/// This drives both:
+/// The order drives both:
 ///   * the **starter set** — the first `STARTER_COUNT` letters are unlocked at launch.
 ///   * the **unlock order** — subsequent letters are added one at a time, left-to-right,
 ///     as the user reaches the target WPM (by historical best) for every active key.
 ///
 /// The focused key is independent of this order: it's the active letter with the
 /// lowest historical-best confidence still below target (this order only breaks ties).
-pub const UNLOCK_ORDER: &[char] = &[
-    'e', 'n', 'i', 'a', 'r', 'l', // starter set (6)
-    't', 'o', 's', 'u', 'd', 'y', 'c', 'g', 'h', 'p', 'm', 'k', 'b', 'w', 'f', 'z', 'v', 'x', 'q',
-    'j',
-];
+#[cfg(test)]
+pub const UNLOCK_ORDER: &[char] = Language::English.unlock_order_const();
 
 const STARTER_COUNT: usize = 6;
 
 /// Number of letters force-included beyond the starter set for a given
 /// `alphabet_size` ∈ [0.0, 1.0] — keybr's `maxSize − minSize`, where
-/// `maxSize = minSize + round((26 − minSize) * alphabetSize)`.
-pub fn forced_extra_letters(alphabet_size: f64) -> usize {
-    ((UNLOCK_ORDER.len() - STARTER_COUNT) as f64 * alphabet_size.clamp(0.0, 1.0)).round() as usize
+/// `maxSize = minSize + round((letters − minSize) * alphabetSize)`.
+pub fn forced_extra_letters(language: Language, alphabet_size: f64) -> usize {
+    ((language.unlock_order().len() - STARTER_COUNT) as f64 * alphabet_size.clamp(0.0, 1.0)).round()
+        as usize
 }
 
 pub struct LetterScheduler {
+    /// Whose alphabet and unlock order this scheduler walks.
+    language: Language,
     pub active_keys: Vec<char>,
     unlock_index: usize, // index of next letter to potentially unlock
     /// Fraction of the non-starter alphabet to force-include regardless of
     /// confidence, mirroring keybr's `alphabetSize` lesson setting.
     /// 0.0 (default) keeps the pure earn-by-confidence progression; 1.0
-    /// includes all 26 letters from the start.
+    /// includes every letter from the start.
     pub alphabet_size: f64,
     /// The key the generator must inject into every word.
     /// The active key with the lowest historical-best confidence below 1.0;
@@ -43,8 +46,14 @@ pub struct LetterScheduler {
 
 impl LetterScheduler {
     pub fn new() -> Self {
-        let active_keys = UNLOCK_ORDER[..STARTER_COUNT].to_vec();
+        Self::for_language(Language::English)
+    }
+
+    /// A fresh scheduler starting from `language`'s starter set.
+    pub fn for_language(language: Language) -> Self {
+        let active_keys = language.unlock_order()[..STARTER_COUNT].to_vec();
         LetterScheduler {
+            language,
             active_keys,
             unlock_index: STARTER_COUNT,
             alphabet_size: 0.0,
@@ -61,11 +70,32 @@ impl LetterScheduler {
     /// duplicate unlocks once `update` ran (e.g. an old save with `['e','t','a',
     /// 'o','i','n','s']` would push `UNLOCK_ORDER[7] = 'o'`, already present).
     pub fn set_unlock_index_from_active(&mut self) {
+        let order = self.language.unlock_order();
         let active: std::collections::HashSet<char> = self.active_keys.iter().copied().collect();
-        self.unlock_index = UNLOCK_ORDER
+        self.unlock_index = order
             .iter()
             .position(|c| !active.contains(c))
-            .unwrap_or(UNLOCK_ORDER.len());
+            .unwrap_or(order.len());
+    }
+
+    /// Restore a saved unlocked set, keeping only letters of this
+    /// scheduler's language (a hand-copied or stale stats file must not
+    /// smuggle foreign letters into the heatmap or the generator).
+    /// Returns false, leaving the starter set in place, when fewer than
+    /// the starter count of valid letters remain.
+    pub fn restore_active_keys(&mut self, saved: Vec<char>) -> bool {
+        let mut keys: Vec<char> = Vec::with_capacity(saved.len());
+        for c in saved {
+            if self.language.is_letter(c) && !keys.contains(&c) {
+                keys.push(c);
+            }
+        }
+        if keys.len() < STARTER_COUNT {
+            return false;
+        }
+        self.active_keys = keys;
+        self.set_unlock_index_from_active();
+        true
     }
 
     /// Refresh the active key set and pick the next focused key.
@@ -82,17 +112,18 @@ impl LetterScheduler {
     ///   key, and the generator places no per-word constraint.
     pub fn update(&mut self, stats: &HashMap<char, KeyStats>, target_cpm: f64) {
         // FORCE-INCLUDE gate: mirror keybr's `alphabetSize` — every letter in
-        // `UNLOCK_ORDER[..maxSize]` is included regardless of confidence,
-        // where maxSize = STARTER_COUNT + round((26 − STARTER_COUNT) ×
+        // `unlock_order[..maxSize]` is included regardless of confidence,
+        // where maxSize = STARTER_COUNT + round((letters − STARTER_COUNT) ×
         // alphabet_size). Only the extras beyond the starter set are forced
         // here: `new()` always includes the starters, and skipping them keeps
         // alphabet_size = 0.0 a strict no-op (e.g. for old-save migrations).
         // Deliberate deviation from keybr: once included, letters never
         // re-lock when the setting is lowered, matching this codebase's
         // no-relock philosophy for earned letters.
-        let max_size = STARTER_COUNT + forced_extra_letters(self.alphabet_size);
+        let order = self.language.unlock_order();
+        let max_size = STARTER_COUNT + forced_extra_letters(self.language, self.alphabet_size);
         let mut forced_any = false;
-        for &letter in &UNLOCK_ORDER[STARTER_COUNT..max_size.min(UNLOCK_ORDER.len())] {
+        for &letter in &order[STARTER_COUNT..max_size.min(order.len())] {
             if !self.active_keys.contains(&letter) {
                 self.active_keys.push(letter);
                 forced_any = true;
@@ -113,17 +144,17 @@ impl LetterScheduler {
         });
 
         // Unlock next key if all current keys are learned (by best).
-        // Defensively skip any UNLOCK_ORDER entries already present in
+        // Defensively skip any unlock-order entries already present in
         // active_keys — this can happen after migrating an old save whose
         // unlock order differed from the current spec.
         if all_learned {
-            while self.unlock_index < UNLOCK_ORDER.len()
-                && self.active_keys.contains(&UNLOCK_ORDER[self.unlock_index])
+            while self.unlock_index < order.len()
+                && self.active_keys.contains(&order[self.unlock_index])
             {
                 self.unlock_index += 1;
             }
-            if self.unlock_index < UNLOCK_ORDER.len() {
-                let next = UNLOCK_ORDER[self.unlock_index];
+            if self.unlock_index < order.len() {
+                let next = order[self.unlock_index];
                 self.active_keys.push(next);
                 self.unlock_index += 1;
             }
@@ -477,6 +508,7 @@ mod tests {
 
     #[test]
     fn forced_extra_letters_formula() {
+        let forced_extra_letters = |a| forced_extra_letters(Language::English, a);
         assert_eq!(forced_extra_letters(0.0), 0);
         assert_eq!(forced_extra_letters(0.05), 1);
         assert_eq!(forced_extra_letters(0.5), 10);
@@ -515,5 +547,32 @@ mod tests {
         let new_key = *sched.active_keys.last().unwrap();
         assert!(!['e', 't', 'a', 'o', 'i', 'n', 's'].contains(&new_key));
         assert!(UNLOCK_ORDER.contains(&new_key));
+    }
+
+    #[test]
+    fn turkish_scheduler_starts_and_unlocks_in_turkish_order() {
+        let mut sched = LetterScheduler::for_language(Language::Turkish);
+        assert_eq!(sched.active_keys, vec!['a', 'e', 'i', 'n', 'ı', 'r']);
+        let target_cpm = 175.0;
+        let mut stats = HashMap::new();
+        for &key in &sched.active_keys.clone() {
+            stats.insert(key, make_learned_stats(target_cpm));
+        }
+        sched.update(&stats, target_cpm);
+        assert_eq!(sched.active_keys.last(), Some(&'l'));
+        assert_eq!(forced_extra_letters(Language::Turkish, 1.0), 23);
+    }
+
+    #[test]
+    fn restore_drops_letters_from_another_alphabet() {
+        let mut sched = LetterScheduler::for_language(Language::Turkish);
+        // An English save: 'w' and 'x' are not Turkish letters.
+        let saved = vec!['a', 'e', 'i', 'n', 'ı', 'r', 'w', 'x', 'l'];
+        assert!(sched.restore_active_keys(saved));
+        assert_eq!(sched.active_keys, vec!['a', 'e', 'i', 'n', 'ı', 'r', 'l']);
+        // Too few valid letters: keep the starter set.
+        let mut fresh = LetterScheduler::for_language(Language::Turkish);
+        assert!(!fresh.restore_active_keys(vec!['q', 'w', 'x']));
+        assert_eq!(fresh.active_keys.len(), 6);
     }
 }

@@ -86,6 +86,7 @@ keybr-tui [OPTIONS]
 | `--data-dir` | Print the data directory path and exit |
 | `--import <FILE>` | Import a keybr.com data export and exit (see below) |
 | `--force` | With `--import`, replace existing stats (a `.bak` backup is kept) |
+| `--language <CODE>` | Practice language: `en` (default) or `tr`; saved to the config (see [Languages](#languages)) |
 | `--help` | Show help |
 | `--version` | Show version |
 
@@ -107,8 +108,19 @@ The importer replays every session through the same per-key smoothing keybr.com 
 A few details worth knowing:
 
 - Your target speed is not part of the export. If you use a non-default target on keybr.com, pass `--target-wpm <N>` alongside `--import`, since the unlocked set is derived against it. With no flag, the target saved in your config is used.
-- Sessions from non-English layouts are skipped, since this TUI is English-only for now.
-- Existing local stats are never overwritten unless you pass `--force`, which still writes a `stats.json.bak` backup first.
+- Only sessions in the practice language are imported: `keybr-tui --language tr --import typing-data.json` takes the Turkish (`tr-tr-*`) sessions, a plain `--import` the English ones. Sessions from both Turkish Q and F are merged into one set of key stats, and the report says so when that happens.
+- Existing local stats are never overwritten unless you pass `--force`, which still writes a `.bak` backup of that language's stats file first.
+
+## Languages
+
+English and Turkish are supported. Each uses keybr.com's own data for that language: its phonetic model, its word list, and its letter order (Turkish starts from `a e i n ı r`). The heatmap shows the language's whole alphabet, with dotted and dotless i as separate keys (`İ` and `I`).
+
+```bash
+keybr-tui --language tr   # switch to Turkish; later runs remember it
+keybr-tui --language en   # back to English
+```
+
+Each language keeps its own stats (`stats.json` for English, `stats-tr.json` for Turkish), so switching never mixes them. Combination drills (`focus_pattern`) are English-only. Typing Turkish needs a Turkish keyboard layout in your OS and a UTF-8 terminal.
 
 ## Configuration
 
@@ -128,11 +140,12 @@ fragment_length = 100
 | `target_wpm` | `35` | Target speed in words per minute; drives the confidence threshold |
 | `error_mode` | `"forgive-mistakes"` | `"forgive-mistakes"` advances past typos, `"stop-on-error"` blocks until you correct them |
 | `fragment_length` | `100` | Characters of practice text generated per lesson |
-| `natural_words` | `true` | Prefer real English words, falling back to the phonetic model when none fit your active letters |
+| `natural_words` | `true` | Prefer real words of the practice language, falling back to the phonetic model when none fit your active letters |
 | `daily_goal_minutes` | `30` | Daily practice goal in minutes; `0` hides the daily-goal indicator |
 | `alphabet_size` | `0.0` | Fraction of the non-starter alphabet to force-unlock regardless of confidence (keybr's `alphabetSize`), clamped to the range 0.0 to 1.0 |
-| `focus_letter` | `unset` | Pins one unlocked letter, given as a single letter (a-z), so every generated word contains it; omit the key (or cycle the Settings "Focus letter" row to Auto) for the automatic weakest-key focus |
+| `focus_letter` | `unset` | Pins one unlocked letter, given as a single lowercase letter of the practice alphabet, so every generated word contains it; omit the key (or cycle the Settings "Focus letter" row to Auto) for the automatic weakest-key focus |
 | `focus_pattern` | `unset` | Pins one combination drill: a bigram (`"cr"`, `"pl"`, `"br"`, `"tr"`, `"gr"`, `"fr"`, `"bl"`, `"cl"`) or a word ending (`"-ing"`, `"-ed"`, `"-er"`, `"-ly"`, `"-tion"`, `"-ment"`, `"-able"`, `"-ous"`), so every generated word matches it instead of just containing one letter; only takes effect while the pattern is on offer, meaning its letters are unlocked and the dictionary has at least 8 distinct words for it, and setting it clears `focus_letter` since the two share one focus slot |
+| `language` | `"en"` | Practice language: `"en"` or `"tr"`; `--language` sets it too |
 
 </details>
 

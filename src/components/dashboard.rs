@@ -38,9 +38,12 @@ const LABEL_WIDTH: usize = 12;
 const GOAL_BAR_CELLS: u32 = 10;
 
 /// Total width of the dashboard's content band: 12 cols for the label
-/// plus 78 cols for 26 three-cell heatmap tiles. All four rows align
-/// to this band so the labels sit in the same column on every line.
-const DASHBOARD_WIDTH: u16 = LABEL_WIDTH as u16 + 26 * key_bar::TILE_WIDTH;
+/// plus one three-cell heatmap tile per letter (78 cols for English's 26,
+/// 87 for Turkish's 29). All four rows align to this band so the labels
+/// sit in the same column on every line.
+fn dashboard_width(app: &App) -> u16 {
+    LABEL_WIDTH as u16 + app.language.letters().len() as u16 * key_bar::TILE_WIDTH
+}
 
 pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     // 5 single-line rows: 4 dashboard sections + 1 callout row that's
@@ -73,8 +76,8 @@ fn label_span(text: &str) -> Span<'static> {
 /// frame. The band is sized to fit the widest row (the heatmap), so
 /// every other row's label lines up underneath the heatmap's label and
 /// nothing gets clipped on standard-width terminals.
-fn centered_inner(area: Rect) -> Rect {
-    let inner_w = DASHBOARD_WIDTH.min(area.width);
+fn centered_inner(app: &App, area: Rect) -> Rect {
+    let inner_w = dashboard_width(app).min(area.width);
     let left_margin = area.width.saturating_sub(inner_w) / 2;
     Rect {
         x: area.x + left_margin,
@@ -85,8 +88,8 @@ fn centered_inner(area: Rect) -> Rect {
 }
 
 /// Render one row by combining the label and its content spans.
-fn render_row(frame: &mut Frame, area: Rect, mut spans: Vec<Span<'static>>) {
-    let inner = centered_inner(area);
+fn render_row(app: &App, frame: &mut Frame, area: Rect, mut spans: Vec<Span<'static>>) {
+    let inner = centered_inner(app, area);
     let mut all = Vec::with_capacity(spans.len() + 1);
     all.append(&mut spans);
     let para = Paragraph::new(Line::from(all)).alignment(Alignment::Left);
@@ -112,7 +115,7 @@ fn render_metrics_row(app: &App, frame: &mut Frame, area: Rect) {
         spans.push(Span::styled("—  acc", dim));
         spans.push(sep);
         spans.push(Span::styled("—", dim));
-        render_row(frame, area, spans);
+        render_row(app, frame, area, spans);
         return;
     };
 
@@ -138,7 +141,7 @@ fn render_metrics_row(app: &App, frame: &mut Frame, area: Rect) {
         spans.push(d);
     }
 
-    render_row(frame, area, spans);
+    render_row(app, frame, area, spans);
 }
 
 /// "12,345" — comma-grouped score for readability.
@@ -189,7 +192,7 @@ fn render_keys_row(app: &App, frame: &mut Frame, area: Rect) {
     // row gets the rest of the centered band. Split the inner area so
     // the label and the tiles share the same horizontal rhythm as the
     // other rows.
-    let inner = centered_inner(area);
+    let inner = centered_inner(app, area);
     let cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Length(LABEL_WIDTH as u16), Constraint::Min(0)])
@@ -198,7 +201,7 @@ fn render_keys_row(app: &App, frame: &mut Frame, area: Rect) {
     let label = Paragraph::new(Line::from(label_span("All keys:"))).alignment(Alignment::Left);
     frame.render_widget(label, cols[0]);
 
-    // Delegate to key_bar — it already knows how to lay out 26 tiles and
+    // Delegate to key_bar — it already knows how to lay out the tiles and
     // handle the focused key, so we just hand it the right sub-rect.
     key_bar::render(app, frame, cols[1]);
 }
@@ -217,7 +220,7 @@ fn render_current_key_row(app: &App, frame: &mut Frame, area: Rect) {
         // explicitly rather than leaving the row blank — that's a
         // milestone worth highlighting.
         spans.push(Span::styled("all keys at target speed", dim));
-        render_row(frame, area, spans);
+        render_row(app, frame, area, spans);
         return;
     };
 
@@ -225,9 +228,9 @@ fn render_current_key_row(app: &App, frame: &mut Frame, area: Rect) {
         // A combination drill has no bucket in `per_key_stats`, which is
         // keyed by single characters: there is no wpm for "CR". Name the
         // drill rather than invent numbers for it or borrow one letter's.
-        spans.push(Span::styled(rule.label(), strong));
+        spans.push(Span::styled(rule.label_in(app.language), strong));
         spans.push(Span::styled("  combination drill", dim));
-        render_row(frame, area, spans);
+        render_row(app, frame, area, spans);
         return;
     };
 
@@ -243,7 +246,12 @@ fn render_current_key_row(app: &App, frame: &mut Frame, area: Rect) {
     // stale pin already fell back to auto inside `effective_focus`).
     let is_pinned = app.focus_is_pinned();
     spans.extend(key_bar::key_tile_spans(
-        focused, best_conf, is_active, true, is_pinned,
+        app.language,
+        focused,
+        best_conf,
+        is_active,
+        true,
+        is_pinned,
     ));
     spans.push(Span::raw("   "));
 
@@ -277,7 +285,7 @@ fn render_current_key_row(app: &App, frame: &mut Frame, area: Rect) {
         None => spans.push(Span::styled("—", dim)),
     }
 
-    render_row(frame, area, spans);
+    render_row(app, frame, area, spans);
 }
 
 // ─── Row 4: Daily goal ──────────────────────────────────────────────────
@@ -289,7 +297,7 @@ fn render_daily_goal_row(app: &App, frame: &mut Frame, area: Rect) {
         // User turned the goal off — show that state explicitly so the
         // row doesn't look like a layout glitch.
         let spans = vec![label_span("Daily goal:"), Span::styled("off", dim)];
-        render_row(frame, area, spans);
+        render_row(app, frame, area, spans);
         return;
     }
 
@@ -323,7 +331,7 @@ fn render_daily_goal_row(app: &App, frame: &mut Frame, area: Rect) {
         Span::styled(empty_str, dim),
         Span::styled(pct_text, dim),
     ];
-    render_row(frame, area, spans);
+    render_row(app, frame, area, spans);
 }
 
 // ─── Row 5: unlock callout (ephemeral) ─────────────────────────────────
@@ -342,7 +350,7 @@ fn render_callout_row(app: &App, frame: &mut Frame, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         ),
     ];
-    render_row(frame, area, spans);
+    render_row(app, frame, area, spans);
 }
 
 #[cfg(test)]

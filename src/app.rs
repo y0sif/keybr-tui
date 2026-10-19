@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use crate::config::{Config, ErrorModeSerde};
-use crate::engine::filter::{FocusRule, FOCUS_PATTERNS, MIN_DRILL_WORDS};
-use crate::engine::{LetterFilter, LetterScheduler, WordGenerator};
+use crate::engine::filter::{FocusRule, MIN_DRILL_WORDS};
+use crate::engine::{Language, LetterFilter, LetterScheduler, WordGenerator};
 use crate::metrics::KeyStats;
 use crate::persistence::{today_date_string, SavedKeyStats, SavedLessonResult, SavedStats};
 
@@ -41,7 +41,7 @@ pub fn lesson_score(wpm: f64, accuracy: f64) -> f64 {
     (wpm * acc_ratio * acc_ratio * 100.0).round()
 }
 
-/// The `FOCUS_PATTERNS` entries a given unlocked alphabet can actually
+/// The language's combination drills a given unlocked alphabet can actually
 /// drill: every letter of the pattern unlocked, and at least
 /// `MIN_DRILL_WORDS` distinct real words behind it.
 ///
@@ -52,10 +52,15 @@ pub fn lesson_score(wpm: f64, accuracy: f64) -> f64 {
 ///
 /// A free function rather than a method because `App::new_with_state`
 /// needs it before there is an `App` to call it on.
-fn compute_available_patterns(generator: &WordGenerator, active_keys: &[char]) -> Vec<FocusRule> {
+fn compute_available_patterns(
+    language: Language,
+    generator: &WordGenerator,
+    active_keys: &[char],
+) -> Vec<FocusRule> {
     let allowed: HashSet<char> = active_keys.iter().copied().collect();
     let dict = generator.dictionary();
-    FOCUS_PATTERNS
+    language
+        .focus_patterns()
         .iter()
         .copied()
         .filter(|rule| rule.letters().iter().all(|c| allowed.contains(c)))
@@ -106,6 +111,9 @@ pub struct App {
     pub lesson_count: u32,
 
     // --- Engine ---
+    /// Practice language: alphabet, phonetic model, word list and which
+    /// stats file this session reads and writes. Fixed for the session.
+    pub language: Language,
     pub scheduler: LetterScheduler,
     pub generator: WordGenerator,
 
@@ -116,7 +124,7 @@ pub struct App {
     pub target_cpm: f64,
     /// Fragment length for text generation.
     pub fragment_length: usize,
-    /// When true, mix real English dictionary words into generated text
+    /// When true, mix real dictionary words into generated text
     /// (falling back to the phonetic model when no word matches the
     /// active letter filter).
     pub natural_words: bool,
@@ -136,6 +144,14 @@ pub struct App {
     /// letter pin and a pattern pin cannot coexist by construction rather
     /// than by convention.
     pub manual_focus: Option<FocusRule>,
+    /// A `focus_letter` from config.toml that this session cannot use but
+    /// another language may have set, since every language shares the
+    /// key. Never applied; held as read so `to_config` writes it back
+    /// instead of erasing it. Set by `set_manual_focus_from_config`, and
+    /// cleared when the user picks a pin in Settings.
+    pub foreign_focus_letter: Option<char>,
+    /// Same as `foreign_focus_letter`, for `focus_pattern`.
+    pub foreign_focus_pattern: Option<String>,
     /// The combination drills the settings pattern row may offer right
     /// now, derived from the unlocked alphabet.
     ///
@@ -190,13 +206,24 @@ impl App {
         Self::new_with_state(target_wpm, error_mode, None)
     }
 
-    /// Create a new App, optionally restoring state from saved stats.
+    /// Create a new English App, optionally restoring state from saved stats.
     pub fn new_with_state(
         target_wpm: u32,
         error_mode: ErrorMode,
         saved: Option<SavedStats>,
     ) -> Self {
-        let mut scheduler = LetterScheduler::new();
+        Self::new_with_language(target_wpm, error_mode, saved, Language::English)
+    }
+
+    /// Create a new App practicing `language`, optionally restoring state
+    /// from that language's saved stats.
+    pub fn new_with_language(
+        target_wpm: u32,
+        error_mode: ErrorMode,
+        saved: Option<SavedStats>,
+        language: Language,
+    ) -> Self {
+        let mut scheduler = LetterScheduler::for_language(language);
         let mut stats: HashMap<char, KeyStats> = HashMap::new();
         let target_cpm = target_wpm as f64 * 5.0;
         let mut lesson_count: u32 = 0;
@@ -221,12 +248,10 @@ impl App {
                 key_stats.reaction_times_ms = recent[start..].to_vec();
             }
 
-            // Restore unlocked letters into scheduler
-            if saved.unlocked_letters.len() >= 6 {
-                scheduler.active_keys = saved.unlocked_letters;
-                // Set unlock_index based on how many keys are active
-                scheduler.set_unlock_index_from_active();
-            }
+            // Restore unlocked letters into scheduler (letters outside the
+            // language's alphabet are dropped; too few left keeps the
+            // starter set, as a short list always did).
+            scheduler.restore_active_keys(saved.unlocked_letters);
 
             lesson_count = saved.total_lessons;
 
@@ -268,7 +293,7 @@ impl App {
             &scheduler.active_keys,
             scheduler.focused_key.map(FocusRule::Key),
         );
-        let mut generator = WordGenerator::new();
+        let mut generator = WordGenerator::for_language(language);
         // Default to the natural-words blend on; main.rs overrides this
         // from the loaded config immediately after construction.
         generator.set_natural_words(true);
@@ -277,7 +302,8 @@ impl App {
         // Seed the drill list for the alphabet we just restored. `main`
         // re-runs the scheduler with the configured `alphabet_size` and
         // refreshes this again before anything reads it.
-        let available_patterns = compute_available_patterns(&generator, &scheduler.active_keys);
+        let available_patterns =
+            compute_available_patterns(language, &generator, &scheduler.active_keys);
         let available_patterns_for_keys = scheduler.active_keys.len();
 
         App {
@@ -298,6 +324,7 @@ impl App {
             last_lesson,
             lesson_history,
             lesson_count,
+            language,
             scheduler,
             generator,
             error_mode,
@@ -307,6 +334,8 @@ impl App {
             daily_goal_minutes: 30,
             alphabet_size: 0.0,
             manual_focus: None,
+            foreign_focus_letter: None,
+            foreign_focus_pattern: None,
             available_patterns,
             available_patterns_for_keys,
             today_seconds_practiced,
@@ -324,7 +353,7 @@ impl App {
     pub fn flush_pending_saves(&mut self) {
         if self.pending_stats_save {
             self.pending_stats_save = false;
-            if let Err(e) = self.to_saved_stats().save() {
+            if let Err(e) = self.to_saved_stats().save(self.language) {
                 eprintln!("Warning: failed to save stats: {e}");
             }
         }
@@ -389,7 +418,7 @@ impl App {
     /// Call after anything that can change `scheduler.active_keys`.
     pub fn refresh_available_patterns(&mut self) {
         self.available_patterns =
-            compute_available_patterns(&self.generator, &self.scheduler.active_keys);
+            compute_available_patterns(self.language, &self.generator, &self.scheduler.active_keys);
         self.available_patterns_for_keys = self.scheduler.active_keys.len();
     }
 
@@ -422,23 +451,56 @@ impl App {
     /// while lessons behave as Auto, and the next config save would
     /// persist that lie. A pattern must still be in `available_patterns`
     /// (letters unlocked *and* words behind it); a letter is lowercased
-    /// first, because the config is a plain TOML file and a hand-edited
+    /// first (with the language's case rules, so Turkish `"I"` is `ı`),
+    /// because the config is a plain TOML file and a hand-edited
     /// `"R"` should pin 'r' rather than silently misbehave, then dropped
     /// unless the letter is unlocked. `effective_focus` keeps its own
     /// guard as defense in depth for pins set at runtime.
+    ///
+    /// The exception is an unusable pin another language may have set
+    /// (see `is_foreign_pin`). It is not applied either, but is kept in
+    /// `foreign_focus_letter` / `foreign_focus_pattern` exactly as read,
+    /// so a session in this language does not erase it from the file.
     ///
     /// Callers must run `run_scheduler_update` with the final
     /// `alphabet_size` applied *before* calling this, so letters
     /// force-unlocked by that setting count as valid pins and the stored
     /// drill list this validates against is current.
     pub fn set_manual_focus_from_config(&mut self, pattern: Option<&str>, letter: Option<char>) {
-        let from_pattern = pattern
-            .and_then(FocusRule::from_config)
-            .filter(|rule| self.available_patterns().contains(rule));
-        let from_letter = letter
-            .map(|c| FocusRule::Key(c.to_ascii_lowercase()))
+        let stored_pattern = pattern.and_then(FocusRule::from_config);
+        let from_pattern = stored_pattern.filter(|rule| self.available_patterns().contains(rule));
+        let stored_letter = letter.map(|c| self.language.lower(c));
+        let from_letter = stored_letter
+            .map(FocusRule::Key)
             .filter(|rule| self.focus_letters_unlocked(rule));
         self.manual_focus = from_pattern.or(from_letter);
+
+        let foreign_pattern = from_pattern.is_none()
+            && stored_pattern
+                .is_some_and(|rule| self.is_foreign_pin(|l| l.focus_patterns().contains(&rule)));
+        self.foreign_focus_pattern = pattern.filter(|_| foreign_pattern).map(str::to_string);
+        let foreign_letter = from_letter.is_none()
+            && stored_letter.is_some_and(|c| self.is_foreign_pin(|l| l.is_letter(c)));
+        self.foreign_focus_letter = letter.filter(|_| foreign_letter);
+    }
+
+    /// True when a config pin this session cannot use may have been set
+    /// in another language, so it must stay in config.toml. `owns` says
+    /// whether a language could have set it: the letter is in its
+    /// alphabet, or the drill is one it offers.
+    ///
+    /// The pin keys record no language, so this goes by who could own the
+    /// pin. English keeps its rule from before languages existed: a letter
+    /// or drill of its own that it cannot use yet (locked, or a drill short
+    /// of words) is dropped, and only a pin it could never have set, like
+    /// Turkish `ş`, is kept. Any other language keeps every pin another
+    /// language could own, since an English pin on a letter they share,
+    /// still locked here, looks exactly like one of its own.
+    fn is_foreign_pin(&self, owns: impl Fn(Language) -> bool) -> bool {
+        let others_own = Language::ALL
+            .iter()
+            .any(|&other| other != self.language && owns(other));
+        others_own && (self.language != Language::English || !owns(self.language))
     }
 
     /// Target WPM for display (WPM = CPM / 5).
@@ -637,6 +699,10 @@ impl App {
             Some(rule) => (None, Some(rule.config_value())),
             None => (None, None),
         };
+        // A pin another language set goes back exactly as it was read
+        // (see `set_manual_focus_from_config`).
+        let focus_letter = focus_letter.or(self.foreign_focus_letter);
+        let focus_pattern = focus_pattern.or_else(|| self.foreign_focus_pattern.clone());
 
         Config {
             target_wpm: self.target_wpm(),
@@ -650,6 +716,7 @@ impl App {
             alphabet_size: self.alphabet_size,
             focus_letter,
             focus_pattern,
+            language: self.language.code().to_string(),
         }
     }
 }
@@ -677,6 +744,7 @@ impl Default for App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::filter::FOCUS_PATTERNS;
     use crate::engine::scheduler::UNLOCK_ORDER;
 
     #[test]
@@ -1195,5 +1263,111 @@ mod tests {
         // report as pinned.
         app.manual_focus = Some(FocusRule::Key('z'));
         assert!(!app.focus_is_pinned());
+    }
+
+    #[test]
+    fn turkish_app_starts_with_turkish_letters_and_no_drills() {
+        let mut app =
+            App::new_with_language(35, ErrorMode::ForgiveMistakes, None, Language::Turkish);
+        assert_eq!(
+            app.scheduler.active_keys,
+            vec!['a', 'e', 'i', 'n', 'ı', 'r']
+        );
+        assert!(app.available_patterns().is_empty());
+        for c in app.generated_text.chars() {
+            assert!(c == ' ' || app.scheduler.active_keys.contains(&c), "{c}");
+        }
+        // Unlock everything: still no English drills on offer.
+        set_active_keys(&mut app, Language::Turkish.unlock_order().to_vec());
+        assert!(app.available_patterns().is_empty());
+        app.start_next_lesson();
+        assert!(app.generated_text.chars().count() >= app.fragment_length);
+    }
+
+    #[test]
+    fn turkish_config_pin_uses_turkish_lowercase() {
+        let mut app =
+            App::new_with_language(35, ErrorMode::ForgiveMistakes, None, Language::Turkish);
+        // Hand-edited uppercase dotless I pins 'ı', which is a starter.
+        app.set_manual_focus_from_config(None, Some('I'));
+        assert_eq!(app.manual_focus, Some(FocusRule::Key('ı')));
+        app.set_manual_focus_from_config(None, Some('İ'));
+        assert_eq!(app.manual_focus, Some(FocusRule::Key('i')));
+        assert_eq!(app.to_config().language, "tr");
+    }
+
+    #[test]
+    fn turkish_save_round_trips_through_saved_stats() {
+        let mut app =
+            App::new_with_language(35, ErrorMode::ForgiveMistakes, None, Language::Turkish);
+        app.per_key_stats.entry('ş').or_default().record_hit(250);
+        let saved = app.to_saved_stats();
+        let json = serde_json::to_string(&saved).unwrap();
+        let back: SavedStats = serde_json::from_str(&json).unwrap();
+        let restored = App::new_with_language(
+            35,
+            ErrorMode::ForgiveMistakes,
+            Some(back),
+            Language::Turkish,
+        );
+        assert!(restored.per_key_stats.contains_key(&'ş'));
+        assert_eq!(restored.scheduler.active_keys, app.scheduler.active_keys);
+    }
+
+    #[test]
+    fn english_pins_survive_a_turkish_session_config_save() {
+        // Every language shares the pin keys. Turkish cannot use an
+        // English pin on 'l' (locked here), on 'q' (not a Turkish letter)
+        // or on an English drill, so it applies none of them, but its
+        // next config save must leave each one in the file.
+        let mut tr =
+            App::new_with_language(35, ErrorMode::ForgiveMistakes, None, Language::Turkish);
+        assert!(!tr.scheduler.active_keys.contains(&'l'));
+        for (pattern, letter) in [(None, Some('l')), (None, Some('q')), (Some("-tion"), None)] {
+            tr.set_manual_focus_from_config(pattern, letter);
+            assert_eq!(tr.manual_focus, None, "{pattern:?} {letter:?}");
+            let cfg = tr.to_config();
+            assert_eq!(cfg.focus_letter, letter);
+            assert_eq!(cfg.focus_pattern.as_deref(), pattern);
+            assert_eq!(cfg.language, "tr");
+        }
+
+        // Back in English, 'l' is a starter letter and pins again.
+        tr.set_manual_focus_from_config(None, Some('l'));
+        let cfg = tr.to_config();
+        let mut en = App::new();
+        en.set_manual_focus_from_config(cfg.focus_pattern.as_deref(), cfg.focus_letter);
+        assert_eq!(en.manual_focus, Some(FocusRule::Key('l')));
+    }
+
+    #[test]
+    fn a_turkish_letter_pin_survives_an_english_session_config_save() {
+        let mut app = App::new();
+        app.set_manual_focus_from_config(None, Some('ş'));
+        assert_eq!(app.manual_focus, None, "'ş' is not an English letter");
+        assert!(!app.focus_is_pinned());
+        assert_eq!(app.to_config().focus_letter, Some('ş'));
+    }
+
+    #[test]
+    fn english_still_erases_pins_it_cannot_use() {
+        // The English-only path is unchanged: a pin on a locked English
+        // letter, an English drill short of letters, junk, and a letter no
+        // supported language has are dropped, and the next save erases
+        // them, exactly as before languages existed.
+        let mut app = App::new();
+        for (pattern, letter) in [
+            (None, Some('z')),
+            (Some("-tion"), None),
+            (Some("banana"), None),
+            (None, Some('1')),
+            (None, Some('é')),
+        ] {
+            app.set_manual_focus_from_config(pattern, letter);
+            assert_eq!(app.manual_focus, None, "{pattern:?} {letter:?}");
+            let cfg = app.to_config();
+            assert_eq!(cfg.focus_letter, None, "{pattern:?} {letter:?}");
+            assert_eq!(cfg.focus_pattern, None, "{pattern:?} {letter:?}");
+        }
     }
 }

@@ -1,5 +1,6 @@
 use super::dictionary::Dictionary;
 use super::filter::{FocusRule, LetterFilter};
+use super::language::Language;
 use super::transition::TransitionTable;
 
 /// Simple deterministic PRNG (xorshift32) — no external rand crate needed.
@@ -46,7 +47,8 @@ impl SimpleRng {
 /// Each next character is sampled from the distribution conditioned on
 /// the previous three characters (with spaces as word boundaries).
 /// Compared to the prior order-2 bigram model, this produces output
-/// that reads as plausible English at filter boundaries.
+/// that reads as plausible words of the model's language at filter
+/// boundaries.
 pub struct WordGenerator {
     rng: SimpleRng,
     table: TransitionTable,
@@ -61,7 +63,7 @@ const MIN_WORD_LEN: usize = 3;
 const MAX_RETRIES: usize = 5;
 const SPACE_BOOST_BASE: f64 = 1.3;
 
-/// History length is `order - 1`. For the order-4 English model this is 3.
+/// History length is `order - 1`. For the order-4 models this is 3.
 const HISTORY_LEN: usize = 3;
 
 impl Default for WordGenerator {
@@ -72,20 +74,30 @@ impl Default for WordGenerator {
 
 impl WordGenerator {
     pub fn new() -> Self {
+        Self::for_language(Language::English)
+    }
+
+    /// A generator drawing on `language`'s phonetic model and word list.
+    pub fn for_language(language: Language) -> Self {
         Self {
             rng: SimpleRng::new(),
-            table: TransitionTable::from_embedded(),
-            dictionary: Dictionary::from_embedded(),
+            table: TransitionTable::for_language(language),
+            dictionary: Dictionary::for_language(language),
             natural_words: true,
         }
     }
 
     #[cfg(test)]
     pub fn with_seed(seed: u32) -> Self {
+        Self::with_seed_for(seed, Language::English)
+    }
+
+    #[cfg(test)]
+    pub fn with_seed_for(seed: u32, language: Language) -> Self {
         Self {
             rng: SimpleRng::with_seed(seed),
-            table: TransitionTable::from_embedded(),
-            dictionary: Dictionary::from_embedded(),
+            table: TransitionTable::for_language(language),
+            dictionary: Dictionary::for_language(language),
             natural_words: true,
         }
     }
@@ -115,8 +127,8 @@ impl WordGenerator {
 
     /// Generate a single word respecting the letter filter.
     ///
-    /// If `natural_words` is enabled, first try to draw a real English
-    /// word from the embedded dictionary that satisfies the filter. If
+    /// If `natural_words` is enabled, first try to draw a real word from
+    /// the embedded dictionary that satisfies the filter. If
     /// no such word exists (e.g. the active letter set is too restrictive
     /// for any real word — typical early in the curriculum), fall back to
     /// the phonetic order-4 model so the user still has plausible-looking
@@ -187,22 +199,25 @@ impl WordGenerator {
     }
 
     fn try_generate_word(&mut self, filter: &LetterFilter) -> Option<String> {
-        let mut word = String::with_capacity(MAX_WORD_LEN);
+        // Lengths are counted in characters, not bytes: Turkish letters
+        // like 'ş' take two bytes in UTF-8.
+        let mut word = String::with_capacity(MAX_WORD_LEN * 2);
+        let mut word_len = 0usize;
 
         // Step 1: Seed the word. Default history is three spaces
         // (a fresh word boundary).
-        let space = TransitionTable::char_to_idx(' ').unwrap();
-        let mut history: [usize; HISTORY_LEN] = [space; HISTORY_LEN];
+        let mut history: [usize; HISTORY_LEN] = [TransitionTable::SPACE; HISTORY_LEN];
 
         if let Some(FocusRule::Key(focused)) = filter.focused {
             let prefix = self.find_prefix_with_key(filter, focused);
             for c in prefix.chars() {
                 word.push(c);
+                word_len += 1;
             }
             // Pad/shift history with the prefix chars (right-aligned —
             // the most recent char of the prefix ends up at history[2]).
             for c in prefix.chars() {
-                if let Some(idx) = TransitionTable::char_to_idx(c) {
+                if let Some(idx) = self.table.char_to_idx(c) {
                     history.copy_within(1.., 0);
                     history[HISTORY_LEN - 1] = idx;
                 }
@@ -211,16 +226,19 @@ impl WordGenerator {
 
         // Step 3–7: Extend the word using order-4 sampling.
         loop {
-            if word.len() >= MAX_WORD_LEN {
+            if word_len >= MAX_WORD_LEN {
                 break;
             }
 
-            match self.sample_next(&history, filter, word.len()) {
+            match self.sample_next(&history, filter, word_len) {
                 Some(' ') => break, // space = end of word
                 Some(c) => {
                     word.push(c);
-                    let idx =
-                        TransitionTable::char_to_idx(c).expect("sampled char must be in alphabet");
+                    word_len += 1;
+                    let idx = self
+                        .table
+                        .char_to_idx(c)
+                        .expect("sampled char must be in alphabet");
                     history.copy_within(1.., 0);
                     history[HISTORY_LEN - 1] = idx;
                 }
@@ -237,7 +255,7 @@ impl WordGenerator {
             }
         }
 
-        if word.len() < MIN_WORD_LEN {
+        if word_len < MIN_WORD_LEN {
             return None;
         }
 
@@ -257,7 +275,7 @@ impl WordGenerator {
         // sure the focused key appears.
 
         let prefix_len = 1 + (self.rng.next_bounded(3) as usize); // 1..=3
-        let space = TransitionTable::char_to_idx(' ').unwrap();
+        let space = TransitionTable::SPACE;
         let mut history: [usize; HISTORY_LEN] = [space; HISTORY_LEN];
         let mut prefix = String::with_capacity(prefix_len);
 
@@ -269,7 +287,7 @@ impl WordGenerator {
             if pos == focused_position {
                 // Place the focused key here.
                 prefix.push(focused);
-                if let Some(idx) = TransitionTable::char_to_idx(focused) {
+                if let Some(idx) = self.table.char_to_idx(focused) {
                     history.copy_within(1.., 0);
                     history[HISTORY_LEN - 1] = idx;
                 }
@@ -279,12 +297,12 @@ impl WordGenerator {
             // Sample from the segment, refusing space (we don't want a
             // word boundary inside our prefix).
             let seg = self.table.segment(&history);
-            let mut candidates: Vec<(char, u32)> = Vec::with_capacity(26);
+            let mut candidates: Vec<(char, u32)> = Vec::with_capacity(seg.len());
             for (i, &freq_val) in seg.iter().enumerate() {
                 if freq_val == 0 || i == space {
                     continue;
                 }
-                let c = TransitionTable::idx_to_char(i);
+                let c = self.table.idx_to_char(i);
                 if filter.is_allowed(c) {
                     candidates.push((c, freq_val as u32));
                 }
@@ -292,14 +310,14 @@ impl WordGenerator {
             if candidates.is_empty() {
                 // Fall back to the focused key if we can't sample.
                 prefix.push(focused);
-                if let Some(idx) = TransitionTable::char_to_idx(focused) {
+                if let Some(idx) = self.table.char_to_idx(focused) {
                     history.copy_within(1.., 0);
                     history[HISTORY_LEN - 1] = idx;
                 }
             } else {
                 let c = self.weighted_sample(&candidates);
                 prefix.push(c);
-                if let Some(idx) = TransitionTable::char_to_idx(c) {
+                if let Some(idx) = self.table.char_to_idx(c) {
                     history.copy_within(1.., 0);
                     history[HISTORY_LEN - 1] = idx;
                 }
@@ -322,14 +340,14 @@ impl WordGenerator {
         let seg = self.table.segment(history);
 
         // Build filtered candidates: (char, adjusted_frequency).
-        let mut candidates: Vec<(char, u32)> = Vec::with_capacity(27);
+        let mut candidates: Vec<(char, u32)> = Vec::with_capacity(seg.len());
 
         for (i, &freq_val) in seg.iter().enumerate() {
             let freq = freq_val as u32;
             if freq == 0 {
                 continue;
             }
-            let c = TransitionTable::idx_to_char(i);
+            let c = self.table.idx_to_char(i);
 
             if c == ' ' {
                 // Step 4: If word is too short, skip space.
@@ -368,7 +386,8 @@ impl WordGenerator {
     }
 
     /// Generate a fragment of text (multiple unique words separated by spaces)
-    /// targeting approximately `target_len` characters.
+    /// targeting approximately `target_len` characters (counted as
+    /// characters, so a Turkish fragment is as long as an English one).
     ///
     /// Duplicate words are rejected and redrawn, giving up after eleven
     /// tries so the loop always makes progress. A combination drill is
@@ -391,7 +410,8 @@ impl WordGenerator {
     /// a pattern focus is allowed to give up. Widening the scoping would
     /// silently change generated text for every letter-only user.
     pub fn generate_fragment(&mut self, filter: &LetterFilter, target_len: usize) -> String {
-        let mut result = String::with_capacity(target_len + 20);
+        let mut result = String::with_capacity(target_len * 2 + 20);
+        let mut result_len = 0usize;
         let mut seen = std::collections::HashSet::new();
         let mut stuck_counter = 0;
         let pattern_focus = matches!(
@@ -400,7 +420,7 @@ impl WordGenerator {
         );
         let mut reject_duplicates = true;
 
-        while result.len() < target_len {
+        while result_len < target_len {
             let word = self.next_word(filter);
 
             // Try to avoid duplicates, but don't loop forever.
@@ -419,7 +439,9 @@ impl WordGenerator {
 
             if !result.is_empty() {
                 result.push(' ');
+                result_len += 1;
             }
+            result_len += word.chars().count();
             result.push_str(&word);
         }
 
@@ -848,6 +870,64 @@ mod tests {
                     ch
                 );
             }
+        }
+    }
+
+    #[test]
+    fn turkish_phonetic_words_use_turkish_letters_and_char_lengths() {
+        // Starter set plus the next few letters, which already include
+        // the dotless 'ı' and 'ü'.
+        let keys: Vec<char> = Language::Turkish.unlock_order()[..12].to_vec();
+        let filter = LetterFilter::new(&keys, Some(FocusRule::Key('ü')));
+        let mut gen = WordGenerator::with_seed_for(42, Language::Turkish);
+        gen.set_natural_words(false);
+        let text = gen.generate_fragment(&filter, 100);
+        assert!(text.chars().count() >= 100, "{text}");
+        for word in text.split_whitespace() {
+            assert!(
+                word.contains('ü'),
+                "focus 'ü' missing from '{word}' in {text}"
+            );
+            let n = word.chars().count();
+            assert!((3..=10).contains(&n), "'{word}' has {n} chars");
+            for c in word.chars() {
+                assert!(keys.contains(&c), "disallowed '{c}' in '{word}'");
+            }
+        }
+    }
+
+    #[test]
+    fn word_length_bounds_count_characters_not_bytes() {
+        // 'ü' takes two bytes in UTF-8, and a focused word carries it in
+        // its first three letters, so a length bound counted in bytes
+        // would stop every such word at nine letters. The full alphabet
+        // makes long words common enough to reach the bound.
+        let keys: Vec<char> = Language::Turkish.letters().to_vec();
+        let filter = LetterFilter::new(&keys, Some(FocusRule::Key('ü')));
+        let mut gen = WordGenerator::with_seed_for(42, Language::Turkish);
+        let lens: Vec<usize> = (0..1000)
+            .map(|_| gen.phonetic_next_word(&filter).chars().count())
+            .collect();
+        assert!(
+            lens.iter()
+                .all(|n| (MIN_WORD_LEN..=MAX_WORD_LEN).contains(n)),
+            "{lens:?}"
+        );
+        assert_eq!(lens.iter().max(), Some(&MAX_WORD_LEN), "{lens:?}");
+    }
+
+    #[test]
+    fn turkish_natural_words_are_real_turkish_words() {
+        let keys: Vec<char> = Language::Turkish.letters().to_vec();
+        let filter = LetterFilter::new(&keys, None);
+        let mut gen = WordGenerator::with_seed_for(7, Language::Turkish);
+        let text = gen.generate_fragment(&filter, 200);
+        let words: std::collections::HashSet<&str> = Language::Turkish.wordlist().lines().collect();
+        for word in text.split_whitespace() {
+            assert!(
+                words.contains(word),
+                "'{word}' is not in the Turkish word list"
+            );
         }
     }
 }

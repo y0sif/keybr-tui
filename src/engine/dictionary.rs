@@ -1,18 +1,17 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::engine::filter::{FocusRule, LetterFilter};
 use crate::engine::generator::SimpleRng;
+use crate::engine::language::Language;
 
-/// Embedded English wordlist.
+/// Dictionary of real words in one language, indexed for fast
+/// filter-aware lookup.
 ///
-/// Source: keybr.com's `packages/keybr-content-words/lib/data/words-en.json`
-/// (10,000 most common English words), normalized to ASCII lowercase a–z only,
-/// length 2..=12, one word per line. See `data/README.md`.
-const RAW_WORDLIST: &str = include_str!("../../data/wordlist-en.txt");
-
-/// Dictionary of real English words, indexed for fast filter-aware lookup.
+/// Source: keybr.com's `packages/keybr-content-words/lib/data/words-<code>.json`,
+/// normalized to the language's lowercase letters only, length 2..=12
+/// characters, one word per line. See `data/README.md`.
 ///
-/// We bucket each word into the 26 per-letter buckets corresponding to the
+/// We bucket each word into per-letter buckets corresponding to the
 /// distinct letters it contains. With a focus rule, the candidate pool is
 /// the bucket for its first letter (every word satisfying the rule must
 /// contain that letter); without one, all words are candidates. The bucket
@@ -20,31 +19,37 @@ const RAW_WORDLIST: &str = include_str!("../../data/wordlist-en.txt");
 /// time. At ~10K words a per-character allowed-set check is plenty fast, no
 /// need for a bitmap index.
 pub struct Dictionary {
+    language: Language,
     all_words: Vec<&'static str>,
-    by_letter: [Vec<u32>; 26],
+    by_letter: HashMap<char, Vec<u32>>,
 }
 
 impl Default for Dictionary {
     fn default() -> Self {
-        Self::from_embedded()
+        Self::for_language(Language::English)
     }
 }
 
 impl Dictionary {
-    /// Build a `Dictionary` from the embedded wordlist.
+    /// Build a `Dictionary` from the embedded English wordlist.
+    #[cfg(test)]
     pub fn from_embedded() -> Self {
-        // Default-construct the 26 per-letter buckets.
-        let mut by_letter: [Vec<u32>; 26] = Default::default();
+        Self::for_language(Language::English)
+    }
+
+    /// Build a `Dictionary` from the embedded wordlist of `language`.
+    pub fn for_language(language: Language) -> Self {
+        let mut by_letter: HashMap<char, Vec<u32>> = HashMap::new();
         let mut all_words: Vec<&'static str> = Vec::with_capacity(10_000);
 
-        for raw in RAW_WORDLIST.lines() {
+        for raw in language.wordlist().lines() {
             let word = raw.trim();
             if word.is_empty() {
                 continue;
             }
-            // Defensive: reject any word that slipped through with
-            // non-ASCII or non-lowercase characters.
-            if !word.bytes().all(|b| b.is_ascii_lowercase()) {
+            // Defensive: reject any word that slipped through with a
+            // character outside the language's lowercase alphabet.
+            if !word.chars().all(|c| language.is_letter(c)) {
                 continue;
             }
 
@@ -52,17 +57,17 @@ impl Dictionary {
             all_words.push(word);
 
             // Index by each distinct letter present in the word.
-            let mut seen = [false; 26];
-            for b in word.bytes() {
-                let li = (b - b'a') as usize;
-                if !seen[li] {
-                    seen[li] = true;
-                    by_letter[li].push(idx);
+            let mut seen: Vec<char> = Vec::with_capacity(word.len());
+            for c in word.chars() {
+                if !seen.contains(&c) {
+                    seen.push(c);
+                    by_letter.entry(c).or_default().push(idx);
                 }
             }
         }
 
         Self {
+            language,
             all_words,
             by_letter,
         }
@@ -91,20 +96,17 @@ impl Dictionary {
     pub fn next_word(&self, filter: &LetterFilter, rng: &mut SimpleRng) -> Option<&'static str> {
         // 1. Reduce the focus to the rule this dictionary can actually
         //    enforce. See `enforceable_rule`.
-        let rule = filter.focused.and_then(enforceable_rule);
+        let rule = filter.focused.and_then(|r| self.enforceable_rule(r));
 
         // 2. Narrow the candidate pool to the bucket for the rule's first
         //    letter. Every word satisfying the rule contains it, so this
         //    loses no candidates, and for a multi-char rule it is only a
         //    pre-narrowing: `sample_filtered` still checks the rule itself.
-        let pool: Option<&[u32]> = match rule.and_then(bucket_letter) {
-            Some(c) => {
-                let bucket = &self.by_letter[(c as u8 - b'a') as usize];
-                if bucket.is_empty() {
-                    return None;
-                }
-                Some(bucket)
-            }
+        let pool: Option<&[u32]> = match rule.and_then(|r| self.bucket_letter(r)) {
+            Some(c) => match self.by_letter.get(&c) {
+                Some(bucket) if !bucket.is_empty() => Some(bucket),
+                _ => return None,
+            },
             // Nothing to enforce, or nothing to index on: consider every
             // word and let the allowed-set check do the filtering.
             None => None,
@@ -136,7 +138,7 @@ impl Dictionary {
         }
         let mut found = 0usize;
         for w in &self.all_words {
-            // Words are ASCII lowercase a-z by construction, so the space
+            // Words hold letters only by construction, so the space
             // exemption in `LetterFilter::is_allowed` never applies here.
             if rule.matches(w) && w.chars().all(|c| allowed.contains(&c)) {
                 found += 1;
@@ -212,41 +214,42 @@ impl Dictionary {
             Some(valid[pick])
         }
     }
-}
 
-/// The part of a focus rule the dictionary enforces, which for a `Key`
-/// outside a-z is nothing at all.
-///
-/// Every word here is ASCII lowercase a-z, so a `Key(' ')` focus (the
-/// scheduler's key set is a-z, but the type admits any char) matches no
-/// word whatsoever. Enforcing it would reject the entire wordlist and
-/// leave the caller with no word to place; treating it as unfocused
-/// returns a real word, which is what this dictionary did before
-/// combination drills existed. Patterns always start a-z, so dropping the
-/// rule here never weakens a drill.
-#[inline]
-fn enforceable_rule(rule: FocusRule) -> Option<FocusRule> {
-    match rule {
-        FocusRule::Key(c) if !c.is_ascii_lowercase() => None,
-        other => Some(other),
+    /// The part of a focus rule the dictionary enforces, which for a `Key`
+    /// outside the language's alphabet is nothing at all.
+    ///
+    /// Every word here is made of the language's letters only, so a
+    /// `Key(' ')` focus (the scheduler's key set is letters, but the type
+    /// admits any char) matches no word whatsoever. Enforcing it would
+    /// reject the entire wordlist and leave the caller with no word to
+    /// place; treating it as unfocused returns a real word, which is what
+    /// this dictionary did before combination drills existed. Patterns
+    /// always start with a letter, so dropping the rule here never weakens
+    /// a drill.
+    #[inline]
+    fn enforceable_rule(&self, rule: FocusRule) -> Option<FocusRule> {
+        match rule {
+            FocusRule::Key(c) if !self.language.is_letter(c) => None,
+            other => Some(other),
+        }
+    }
+
+    /// The letter whose bucket can hold every word satisfying `rule`: the
+    /// key itself, or the first letter of a pattern. `None` means there is
+    /// no such bucket and the whole wordlist has to be considered.
+    #[inline]
+    fn bucket_letter(&self, rule: FocusRule) -> Option<char> {
+        let first = match rule {
+            FocusRule::Key(c) => c,
+            FocusRule::Contains(p) | FocusRule::Suffix(p) => p.chars().next()?,
+        };
+        self.language.is_letter(first).then_some(first)
     }
 }
 
-/// The a-z letter whose bucket can hold every word satisfying `rule`: the
-/// key itself, or the first letter of a pattern. `None` means there is no
-/// such bucket and the whole wordlist has to be considered.
-#[inline]
-fn bucket_letter(rule: FocusRule) -> Option<char> {
-    let first = match rule {
-        FocusRule::Key(c) => c,
-        FocusRule::Contains(p) | FocusRule::Suffix(p) => p.chars().next()?,
-    };
-    first.is_ascii_lowercase().then_some(first)
-}
-
 /// True if `word` satisfies `rule` and every character in it is allowed.
-/// Words are ASCII lowercase a–z by construction, so we don't need to
-/// consider space or uppercase.
+/// Words hold the language's lowercase letters only by construction, so we
+/// don't need to consider space or uppercase.
 ///
 /// `rule` is the enforceable rule from `next_word`, not `filter.focused`
 /// verbatim. The check is load-bearing rather than a belt-and-braces
@@ -493,6 +496,62 @@ mod tests {
             if let Some(word) = dict.next_word(&filter, &mut rng) {
                 assert!(word.chars().all(|c| narrow.contains(&c)), "{word}");
             }
+        }
+    }
+
+    #[test]
+    fn turkish_wordlist_loads_with_its_own_letters() {
+        let dict = Dictionary::for_language(Language::Turkish);
+        assert!(dict.len() >= 8000, "got {}", dict.len());
+        for w in &dict.all_words {
+            assert!(
+                w.chars().all(|c| Language::Turkish.is_letter(c)),
+                "bad word: {w}"
+            );
+            let n = w.chars().count();
+            assert!((2..=12).contains(&n), "bad length: {w}");
+        }
+        // The multi-byte letters made it into the index, not just ASCII.
+        for c in ['ç', 'ğ', 'ı', 'ö', 'ş', 'ü'] {
+            assert!(
+                dict.by_letter.get(&c).is_some_and(|b| b.len() > 100),
+                "too few words with '{c}'"
+            );
+        }
+    }
+
+    #[test]
+    fn turkish_focus_on_a_non_ascii_letter() {
+        let dict = Dictionary::for_language(Language::Turkish);
+        let allowed: Vec<char> = Language::Turkish.unlock_order()[..14].to_vec();
+        assert!(allowed.contains(&'ı') && allowed.contains(&'ü'));
+        let filter = LetterFilter::new(&allowed, Some(FocusRule::Key('ü')));
+        let mut rng = SimpleRng::with_seed(3);
+        for _ in 0..100 {
+            let word = dict
+                .next_word(&filter, &mut rng)
+                .expect("plenty of words use 'ü' with these letters");
+            assert!(word.contains('ü'), "{word}");
+            assert!(word.chars().all(|c| allowed.contains(&c)), "{word}");
+        }
+    }
+
+    #[test]
+    fn dotted_and_dotless_i_are_different_letters() {
+        // A filter that unlocks 'i' but not 'ı' must never return a word
+        // spelled with 'ı'.
+        let dict = Dictionary::for_language(Language::Turkish);
+        let allowed: Vec<char> = Language::Turkish
+            .letters()
+            .iter()
+            .copied()
+            .filter(|&c| c != 'ı')
+            .collect();
+        let filter = LetterFilter::new(&allowed, Some(FocusRule::Key('i')));
+        let mut rng = SimpleRng::with_seed(17);
+        for _ in 0..200 {
+            let word = dict.next_word(&filter, &mut rng).unwrap();
+            assert!(!word.contains('ı'), "{word}");
         }
     }
 

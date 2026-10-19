@@ -3,8 +3,9 @@
 //! Ported from upstream keybr.com
 //! (`packages/keybr-phonetic-model/lib/transitiontable.ts`).
 //!
-//! The embedded binary file `data/model-en.data` encodes a phonetic
-//! transition table trained on English text. Compared to the previous
+//! Each language embeds one binary model from keybr.com
+//! (`data/model-<code>.data`, see [`Language::model_bytes`]); `model-en.data`
+//! is the phonetic transition table trained on English text. Compared to the previous
 //! 27×27 bigram model, this order-4 chain conditions each character on
 //! the previous three characters, which dramatically reduces gibberish
 //! at filter boundaries (e.g. the bigram model produced "ata ete tat";
@@ -15,8 +16,8 @@
 //! ```text
 //! [9 bytes] ASCII signature "keybr.com"
 //! [1 byte]  order (= 4)
-//! [1 byte]  alphabet size (= 27)
-//! [size*2]  alphabet code points (u16 BE): 0x0020 (space), 'a'..'z'
+//! [1 byte]  alphabet size (27 for English: space + a..z)
+//! [size*2]  alphabet code points (u16 BE): 0x0020 (space), then the letters
 //! [...]     sparse segment data, one segment per (order-1)-char history:
 //!             [1 byte] segment length N (entries with non-zero frequency)
 //!             [N*2]    pairs of (alphabet_index u8, frequency u8)
@@ -29,28 +30,30 @@
 //! flattened in row-major order so segment lookup is a single index
 //! computation: `offset = ((h0 * size) + h1) * size + h2`.
 
-/// Embedded order-4 English phonetic model from upstream keybr.com.
-const MODEL_BYTES: &[u8] = include_bytes!("../../data/model-en.data");
+use std::collections::HashMap;
+
+use super::language::Language;
 
 /// ASCII signature at the start of every model file.
 const SIGNATURE: &[u8] = b"keybr.com";
 
-/// Alphabet size we expect for English: space + a..z.
-const EXPECTED_ALPHABET_SIZE: usize = 27;
-
-/// Markov chain order we expect from the upstream English model.
+/// Markov chain order we expect from the upstream models.
 const EXPECTED_ORDER: usize = 4;
 
 /// Decoded order-4 transition table.
 ///
-/// Once loaded, lookup is O(1): a segment is a contiguous 27-byte slice
-/// containing the next-character frequency distribution given the last
-/// `order - 1` characters.
+/// Once loaded, lookup is O(1): a segment is a contiguous
+/// `alphabet_size`-byte slice containing the next-character frequency
+/// distribution given the last `order - 1` characters.
 pub struct TransitionTable {
-    /// Markov chain order (= 4 for the English model).
+    /// Markov chain order (= 4 for every upstream model).
     order: usize,
-    /// Number of distinct symbols (= 27: space + a..z).
+    /// Number of distinct symbols: space plus the language's letters.
     alphabet_size: usize,
+    /// Symbol for each alphabet index; index 0 is always space.
+    alphabet: Vec<char>,
+    /// Reverse of `alphabet`.
+    index: HashMap<char, usize>,
     /// Densely decoded segment data: `alphabet_size.pow(order)` bytes.
     ///
     /// Indexing: for history `[h0, h1, ..., h_{order-2}]` the segment
@@ -60,19 +63,27 @@ pub struct TransitionTable {
 
 impl TransitionTable {
     /// Decode the embedded English model.
+    #[cfg(test)]
+    pub fn from_embedded() -> Self {
+        Self::for_language(Language::English)
+    }
+
+    /// Decode the embedded model for `language`.
     ///
     /// Panics with a descriptive message if the binary asset is missing
     /// or malformed — this is a build-time/asset failure and not
     /// something the runtime should attempt to recover from.
-    pub fn from_embedded() -> Self {
-        Self::from_bytes(MODEL_BYTES).expect("embedded model-en.data is malformed")
+    pub fn for_language(language: Language) -> Self {
+        Self::from_bytes(language.model_bytes(), language.letters())
+            .unwrap_or_else(|e| panic!("embedded model-{}.data is malformed: {e}", language.code()))
     }
 
-    /// Decode a transition table from a raw byte slice.
+    /// Decode a transition table from a raw byte slice whose alphabet must
+    /// be space followed by exactly `letters`, in that order.
     ///
     /// Returns an error string describing the first malformed field
     /// encountered, suitable for `expect()` in callers.
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
+    pub fn from_bytes(bytes: &[u8], letters: &[char]) -> Result<Self, String> {
         let mut cursor = 0usize;
 
         // --- Signature ---
@@ -96,10 +107,11 @@ impl TransitionTable {
         if order != EXPECTED_ORDER {
             return Err(format!("unsupported order {} (expected 4)", order));
         }
-        if alphabet_size != EXPECTED_ALPHABET_SIZE {
+        let expected_size = letters.len() + 1;
+        if alphabet_size != expected_size {
             return Err(format!(
-                "unsupported alphabet size {} (expected 27)",
-                alphabet_size
+                "unsupported alphabet size {} (expected {})",
+                alphabet_size, expected_size
             ));
         }
 
@@ -108,23 +120,22 @@ impl TransitionTable {
         if bytes.len() < cursor + alphabet_bytes {
             return Err("file too short for alphabet".into());
         }
+        let mut alphabet = Vec::with_capacity(alphabet_size);
         for i in 0..alphabet_size {
             let hi = bytes[cursor + i * 2] as u16;
             let lo = bytes[cursor + i * 2 + 1] as u16;
             let code_point = (hi << 8) | lo;
-            let expected: u16 = if i == 0 {
-                0x0020
-            } else {
-                (b'a' + (i as u8) - 1) as u16
-            };
-            if code_point != expected {
+            let expected = if i == 0 { ' ' } else { letters[i - 1] };
+            if u32::from(code_point) != expected as u32 {
                 return Err(format!(
                     "unexpected alphabet code point at slot {}: 0x{:04x} (expected 0x{:04x})",
-                    i, code_point, expected
+                    i, code_point, expected as u32
                 ));
             }
+            alphabet.push(expected);
         }
         cursor += alphabet_bytes;
+        let index = alphabet.iter().enumerate().map(|(i, &c)| (c, i)).collect();
 
         // --- Segments ---
         // For order N, there are size^(N-1) segments, each of length size.
@@ -180,6 +191,8 @@ impl TransitionTable {
         Ok(Self {
             order,
             alphabet_size,
+            alphabet,
+            index,
             data,
         })
     }
@@ -191,47 +204,57 @@ impl TransitionTable {
         self.order
     }
 
-    /// Number of symbols in the alphabet (currently always 27).
+    /// Number of symbols in the alphabet (space plus the letters).
     #[inline]
     #[allow(dead_code)]
     pub fn alphabet_size(&self) -> usize {
         self.alphabet_size
     }
 
+    /// Alphabet index of space, the word boundary.
+    pub const SPACE: usize = 0;
+
     /// Convert a character to its alphabet index.
     ///
-    /// Returns `Some(0)` for space, `Some(1..=26)` for `'a'..='z'`,
-    /// and `None` for any character outside the alphabet.
+    /// Returns `Some(0)` for space, `Some(1..)` for the letters in model
+    /// order, and `None` for any character outside the alphabet.
     #[inline]
-    pub fn char_to_idx(c: char) -> Option<usize> {
-        if c == ' ' {
-            Some(0)
-        } else if c.is_ascii_lowercase() {
-            Some((c as u8 - b'a' + 1) as usize)
-        } else {
-            None
-        }
+    pub fn char_to_idx(&self, c: char) -> Option<usize> {
+        self.index.get(&c).copied()
     }
 
     /// Convert an alphabet index back to a character.
     ///
-    /// `0` → space, `1..=26` → `'a'..='z'`. Panics if `i > 26`.
+    /// `0` → space. Panics if `i` is out of range.
     #[inline]
-    pub fn idx_to_char(i: usize) -> char {
-        if i == 0 {
-            ' '
-        } else if i <= 26 {
-            (b'a' + (i as u8) - 1) as char
-        } else {
-            panic!("alphabet index {} out of range", i)
+    pub fn idx_to_char(&self, i: usize) -> char {
+        self.alphabet[i]
+    }
+
+    /// Summed frequency of every letter across all segments: keybr.com's
+    /// `TransitionTable.letters`, which drives the unlock order.
+    #[cfg(test)]
+    pub fn letter_totals(&self) -> Vec<(char, u64)> {
+        let mut totals = vec![0u64; self.alphabet_size];
+        for segment in self.data.chunks(self.alphabet_size) {
+            for (i, &f) in segment.iter().enumerate() {
+                totals[i] += u64::from(f);
+            }
         }
+        totals
+            .into_iter()
+            .enumerate()
+            .skip(1)
+            .map(|(i, f)| (self.alphabet[i], f))
+            .collect()
     }
 
     /// Look up the frequency distribution for the next character given
     /// the last `order - 1` characters of history (in chronological order
     /// — oldest first).
     ///
-    /// Returns a 27-byte slice indexed by next-character alphabet index.
+    /// Returns an `alphabet_size`-byte slice indexed by next-character
+    /// alphabet index.
     /// Frequencies in the slice sum to 255 for non-empty segments, or
     /// 0 for histories that never occurred in the training corpus.
     #[inline]
@@ -260,33 +283,84 @@ mod tests {
 
     #[test]
     fn char_idx_roundtrip() {
-        assert_eq!(TransitionTable::char_to_idx(' '), Some(0));
-        assert_eq!(TransitionTable::idx_to_char(0), ' ');
+        let table = TransitionTable::from_embedded();
+        assert_eq!(table.char_to_idx(' '), Some(0));
+        assert_eq!(table.idx_to_char(0), ' ');
         for c in 'a'..='z' {
-            let idx = TransitionTable::char_to_idx(c).unwrap();
-            assert_eq!(TransitionTable::idx_to_char(idx), c);
+            let idx = table.char_to_idx(c).unwrap();
+            assert_eq!(table.idx_to_char(idx), c);
         }
-        assert_eq!(TransitionTable::char_to_idx('A'), None);
-        assert_eq!(TransitionTable::char_to_idx('!'), None);
+        assert_eq!(table.char_to_idx('A'), None);
+        assert_eq!(table.char_to_idx('!'), None);
+        assert_eq!(table.char_to_idx('ş'), None);
+    }
+
+    #[test]
+    fn loads_turkish_model() {
+        let table = TransitionTable::for_language(Language::Turkish);
+        assert_eq!(table.order(), 4);
+        assert_eq!(table.alphabet_size(), 30);
+        for &c in Language::Turkish.letters() {
+            let idx = table
+                .char_to_idx(c)
+                .expect("every Turkish letter is in the model");
+            assert_eq!(table.idx_to_char(idx), c);
+        }
+        assert_eq!(table.char_to_idx('q'), None);
+        assert_eq!(table.char_to_idx('w'), None);
+    }
+
+    #[test]
+    fn rejects_a_model_for_another_alphabet() {
+        let err = TransitionTable::from_bytes(
+            Language::Turkish.model_bytes(),
+            Language::English.letters(),
+        )
+        .err()
+        .expect("a Turkish model must not load as English");
+        assert!(err.contains("alphabet size"), "{err}");
+    }
+
+    #[test]
+    fn turkish_segment_lookup_is_plausible() {
+        // "bir" is the most common Turkish word; after " bi" the model
+        // should rate 'r' as the most likely next letter.
+        let table = TransitionTable::for_language(Language::Turkish);
+        let history = [
+            table.char_to_idx(' ').unwrap(),
+            table.char_to_idx('b').unwrap(),
+            table.char_to_idx('i').unwrap(),
+        ];
+        let seg = table.segment(&history);
+        let max_idx = seg
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, &v)| v)
+            .map(|(i, _)| i)
+            .unwrap();
+        assert_eq!(table.idx_to_char(max_idx), 'r');
     }
 
     #[test]
     fn every_segment_sums_to_255_or_0() {
-        // Each 27-byte segment is either a normalized frequency
+        // Each segment is either a normalized frequency
         // distribution (sums to 255) or all-zero for an impossible
         // history that never appeared during training.
-        let table = TransitionTable::from_embedded();
-        let n = table.alphabet_size;
-        let segments = n.pow((table.order - 1) as u32);
-        for seg in 0..segments {
-            let slice = &table.data[seg * n..(seg + 1) * n];
-            let sum: u32 = slice.iter().map(|&b| b as u32).sum();
-            assert!(
-                sum == 0 || sum == 255,
-                "segment {} sums to {} (expected 0 or 255)",
-                seg,
-                sum
-            );
+        for &lang in Language::ALL {
+            let table = TransitionTable::for_language(lang);
+            let n = table.alphabet_size;
+            let segments = n.pow((table.order - 1) as u32);
+            for seg in 0..segments {
+                let slice = &table.data[seg * n..(seg + 1) * n];
+                let sum: u32 = slice.iter().map(|&b| b as u32).sum();
+                assert!(
+                    sum == 0 || sum == 255,
+                    "{} segment {} sums to {} (expected 0 or 255)",
+                    lang.code(),
+                    seg,
+                    sum
+                );
+            }
         }
     }
 
@@ -298,15 +372,15 @@ mod tests {
         // confirm the segment is non-empty and that 'e' is the most
         // likely follow-up (forming "the" — the most common English word).
         let history = [
-            TransitionTable::char_to_idx(' ').unwrap(),
-            TransitionTable::char_to_idx('t').unwrap(),
-            TransitionTable::char_to_idx('h').unwrap(),
+            table.char_to_idx(' ').unwrap(),
+            table.char_to_idx('t').unwrap(),
+            table.char_to_idx('h').unwrap(),
         ];
         let seg = table.segment(&history);
         let sum: u32 = seg.iter().map(|&b| b as u32).sum();
         assert_eq!(sum, 255, "_th segment should be a populated distribution");
 
-        let e_idx = TransitionTable::char_to_idx('e').unwrap();
+        let e_idx = table.char_to_idx('e').unwrap();
         let max_idx = seg
             .iter()
             .enumerate()

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Turkish practice language (`--language tr` or `language = "tr"` in
+  `config.toml`). It uses keybr.com's Turkish phonetic model, word list and
+  frequency-derived letter order, shows all 29 letters in the heatmap with
+  Turkish case rules (`i` → `İ`, `ı` → `I`), and keeps its stats in its own
+  `stats-tr.json`. `--import` replays the Turkish sessions of a keybr.com
+  export when run with `--language tr`.
+
+### Changed
+
+- The engine no longer assumes the alphabet is `a-z`: the transition table
+  reads its alphabet from the model file, the dictionary and word lengths are
+  UTF-8 aware, and the unlock order, heatmap and import filter come from the
+  practice language. English behaviour, files and generated text are
+  unchanged.
+
 ## [0.2.4] - 2026-09-29
 
 ### Fixed

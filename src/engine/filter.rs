@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 
+use crate::engine::language::Language;
+
 /// What every generated word must satisfy.
 ///
 /// `Key` is the adaptive curriculum's focus, the single weakest letter the
@@ -92,11 +94,18 @@ impl FocusRule {
 
     /// Display form: `"E"`, `"CR"`, `"-TION"`. The leading dash is how the
     /// UI says "word ending" without spending a word on it.
+    #[cfg(test)]
     pub fn label(&self) -> String {
+        self.label_in(Language::English)
+    }
+
+    /// `label` with `language`'s case rules, so Turkish `i` shows as `İ`
+    /// rather than colliding with dotless `ı` → `I`.
+    pub fn label_in(&self, language: Language) -> String {
         match self {
-            FocusRule::Key(c) => c.to_uppercase().to_string(),
-            FocusRule::Contains(p) => p.to_uppercase(),
-            FocusRule::Suffix(p) => format!("-{}", p.to_uppercase()),
+            FocusRule::Key(c) => language.upper(*c),
+            FocusRule::Contains(p) => language.upper_str(p),
+            FocusRule::Suffix(p) => format!("-{}", language.upper_str(p)),
         }
     }
 
@@ -113,8 +122,9 @@ impl FocusRule {
     /// Parse a `config_value` back into a rule.
     ///
     /// The config file is hand-edited, so this is deliberately strict: the
-    /// only accepted values are one `a-z` letter and the exact lowercase
-    /// spelling of a preset in `FOCUS_PATTERNS`. Uppercase, stray
+    /// only accepted values are one lowercase letter and the exact lowercase
+    /// spelling of a preset in `FOCUS_PATTERNS`. Whether the letter belongs
+    /// to the practice alphabet is the caller's check (it must be unlocked). Uppercase, stray
     /// whitespace and retired patterns all read as `None`, which the
     /// caller treats as "no pin" rather than as an error.
     pub fn from_config(s: &str) -> Option<Self> {
@@ -127,7 +137,7 @@ impl FocusRule {
 
         let mut chars = s.chars();
         if let (Some(c), None) = (chars.next(), chars.next()) {
-            return c.is_ascii_lowercase().then_some(FocusRule::Key(c));
+            return (c.is_alphabetic() && c.is_lowercase()).then_some(FocusRule::Key(c));
         }
 
         FOCUS_PATTERNS
@@ -229,6 +239,15 @@ mod tests {
     }
 
     #[test]
+    fn turkish_letters_parse_and_label_with_turkish_case() {
+        assert_eq!(FocusRule::from_config("ş"), Some(FocusRule::Key('ş')));
+        assert_eq!(FocusRule::from_config("ı"), Some(FocusRule::Key('ı')));
+        assert_eq!(FocusRule::Key('i').label_in(Language::Turkish), "İ");
+        assert_eq!(FocusRule::Key('ı').label_in(Language::Turkish), "I");
+        assert_eq!(FocusRule::Key('i').label_in(Language::English), "I");
+    }
+
+    #[test]
     fn labels_are_uppercase_with_dashed_suffixes() {
         assert_eq!(FocusRule::Key('e').label(), "E");
         assert_eq!(FocusRule::Contains("cr").label(), "CR");
@@ -269,6 +288,7 @@ mod tests {
         assert_eq!(FocusRule::from_config("-"), None);
         // Uppercase: config_value is lowercase, so this never round-trips.
         assert_eq!(FocusRule::from_config("E"), None);
+        assert_eq!(FocusRule::from_config("Ş"), None);
         assert_eq!(FocusRule::from_config("CR"), None);
         assert_eq!(FocusRule::from_config("-TION"), None);
         // Non-letters and whitespace.

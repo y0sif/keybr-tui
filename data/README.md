@@ -53,6 +53,16 @@ here under the same terms. Redistribution of this binary asset within
 the keybr-tui repository preserves attribution to the original
 authors at <https://github.com/aradzie/keybr.com>.
 
+## `model-tr.data`
+
+The Turkish model, same format: order 4, alphabet size 30 (space followed
+by `abcçdefgğhıijklmnoöprsştuüvyz`, code points stored big-endian like the
+English file). Copied verbatim from
+`packages/keybr-phonetic-model/assets/model-tr.data` in the keybr.com
+source tree. The Turkish unlock order in `src/engine/language.rs` is
+keybr.com's `Letter.frequencyOrder` over this file, and a test re-derives
+it.
+
 ## `wordlist-en.txt`
 
 A list of real English words used by the natural-words blend in
@@ -85,3 +95,27 @@ Result: 9,906 lines, ~76 KB.
 Same upstream licence as the phonetic model — keybr.com is GNU AGPLv3.
 Attribution is preserved here through this file and through the
 embedded source comment in `src/engine/dictionary.rs`.
+
+## `wordlist-tr.txt`
+
+Real Turkish words for the natural-words blend.
+
+### Source
+
+keybr.com's `packages/keybr-content-words/lib/data/words-tr.json`
+(8,886 words).
+
+### Normalisation
+
+- JSON string array → one word per line, UTF-8
+- Lowercased with Turkish rules (`I` → `ı`, `İ` → `i`), only words made of
+  the 29 Turkish letters kept
+- Length filtered to 2..=12 characters (characters, not bytes)
+- Duplicates removed
+
+Result: 8,752 lines. Of the 134 dropped words, 132 are longer than 12
+characters and 2 are single letters (`u`, `ü`).
+
+### License
+
+Same upstream licence as above — keybr.com is GNU AGPLv3.

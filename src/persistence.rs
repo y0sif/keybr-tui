@@ -4,6 +4,8 @@ use std::path::PathBuf;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
+use crate::engine::Language;
+
 fn default_version() -> u32 {
     1
 }
@@ -329,15 +331,19 @@ pub struct SavedStats {
 }
 
 impl SavedStats {
-    /// Return the stats file path, or `None` if the platform has no data dir.
-    pub fn path() -> Option<PathBuf> {
-        ProjectDirs::from("", "", "keybr-tui").map(|dirs| dirs.data_dir().join("stats.json"))
+    /// Return the stats file path for `language`, or `None` if the platform
+    /// has no data dir. Each language has its own file (per-key stats for
+    /// `i` in English and Turkish are different keys on different
+    /// keyboards), and English keeps the original `stats.json`.
+    pub fn path(language: Language) -> Option<PathBuf> {
+        ProjectDirs::from("", "", "keybr-tui")
+            .map(|dirs| dirs.data_dir().join(language.stats_file_name()))
     }
 
     /// Load stats from disk. Returns `None` if the file doesn't exist.
     /// Returns `None` with a warning if the file is malformed.
-    pub fn load() -> Option<Self> {
-        let path = Self::path()?;
+    pub fn load(language: Language) -> Option<Self> {
+        let path = Self::path(language)?;
 
         if !path.exists() {
             return None;
@@ -390,8 +396,8 @@ impl SavedStats {
     }
 
     /// Save stats to disk, creating directories if needed.
-    pub fn save(&self) -> color_eyre::Result<()> {
-        let path = match Self::path() {
+    pub fn save(&self, language: Language) -> color_eyre::Result<()> {
+        let path = match Self::path(language) {
             Some(p) => p,
             None => return Ok(()),
         };
@@ -406,8 +412,8 @@ impl SavedStats {
     }
 
     /// Delete the stats file from disk (for --reset).
-    pub fn delete() -> color_eyre::Result<bool> {
-        if let Some(path) = Self::path() {
+    pub fn delete(language: Language) -> color_eyre::Result<bool> {
+        if let Some(path) = Self::path(language) {
             if path.exists() {
                 std::fs::remove_file(&path)?;
                 return Ok(true);
@@ -851,6 +857,11 @@ mod tests {
 
     #[test]
     fn stats_path_is_some() {
-        assert!(SavedStats::path().is_some());
+        assert!(SavedStats::path(Language::English).is_some());
+        let en = SavedStats::path(Language::English).unwrap();
+        let tr = SavedStats::path(Language::Turkish).unwrap();
+        assert_eq!(en.file_name().unwrap(), "stats.json");
+        assert_eq!(tr.file_name().unwrap(), "stats-tr.json");
+        assert_eq!(en.parent(), tr.parent());
     }
 }
