@@ -12,10 +12,13 @@ keybr-tui is a faithful port of the keybr.com adaptive algorithm to a terminal U
 
 Yes. On keybr.com, open your profile page and click **Download data** to get a
 `typing-data.json` file with your full practice history, then run
-`keybr-tui --import typing-data.json`. The importer replays every session through
+`keybr-tui --import typing-data.json`. The importer replays your sessions through
 the same per-key smoothing keybr.com uses, so your unlocked letters, per-key
-speeds, and focus letter come out exactly as the website computed them. See the
-"Migrating from keybr.com" section of the README for the full details.
+speeds, and focus letter come out exactly as the website computed them. It takes
+the sessions of your practice language and, since keybr.com keeps key stats per
+layout family, only the family of your latest session; `--layout` picks another
+family (`colemak`, `qwertz`) or `all` to merge them. See the "Bring your
+keybr.com history" section of the README for the full details.
 
 ## Does keybr-tui work offline?
 
@@ -59,11 +62,11 @@ In `move-on` mode (forgive mistakes), an incorrect keystroke is recorded but the
 
 ## Can I use a Dvorak or Colemak layout?
 
-Typing itself is layout-agnostic — keybr-tui reads whatever character your OS sends. The MVP unlocks letters in the QWERTY frequency order from keybr.com, so the *schedule* assumes QWERTY; layout-aware unlock orders are planned for post-MVP.
+Yes. Typing is layout-agnostic: keybr-tui reads whatever character your OS sends. The unlock order comes from the practice language's letter frequencies, not from the keyboard layout, as on keybr.com by default. When importing, `--layout` picks which layout family's sessions to replay.
 
 ## Does it support languages other than English?
 
-Not yet. The phonetic Markov model bundled with the MVP is English-only. Non-English phonetic models and locale-specific letter unlock orders are tracked as post-MVP work.
+Yes: English, Turkish and German. Run `keybr-tui --language tr` or `keybr-tui --language de` to switch (later runs remember it). Each language uses keybr.com's phonetic model, word list and letter unlock order for that language, and keeps its own stats. See the "Languages" section of the README.
 
 ## How can I contribute?
 

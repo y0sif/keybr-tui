@@ -86,7 +86,8 @@ keybr-tui [OPTIONS]
 | `--data-dir` | Print the data directory path and exit |
 | `--import <FILE>` | Import a keybr.com data export and exit (see below) |
 | `--force` | With `--import`, replace existing stats (a `.bak` backup is kept) |
-| `--language <CODE>` | Practice language: `en` (default) or `tr`; saved to the config (see [Languages](#languages)) |
+| `--layout <LAYOUT>` | With `--import`, the keybr.com layout family to import: a family (`colemak`), a layout id (`en-colemak`) or `all`; default: the family of your latest session |
+| `--language <CODE>` | Practice language: `en` (default), `tr` or `de`; saved to the config (see [Languages](#languages)) |
 | `--help` | Show help |
 | `--version` | Show version |
 
@@ -108,19 +109,21 @@ The importer replays every session through the same per-key smoothing keybr.com 
 A few details worth knowing:
 
 - Your target speed is not part of the export. If you use a non-default target on keybr.com, pass `--target-wpm <N>` alongside `--import`, since the unlocked set is derived against it. With no flag, the target saved in your config is used.
-- Only sessions in the practice language are imported: `keybr-tui --language tr --import typing-data.json` takes the Turkish (`tr-tr-*`) sessions, a plain `--import` the English ones. Sessions from both Turkish Q and F are merged into one set of key stats, and the report says so when that happens.
+- Only sessions in the practice language are imported: `keybr-tui --language tr --import typing-data.json` takes the Turkish (`tr-tr-*`) sessions, a plain `--import` the English ones.
+- keybr.com keeps separate key stats for each layout family (`qwerty`, `qwertz`, `dvorak`, `colemak` and so on), so the importer takes one family: by default, the family of your most recent session in the practice language. Pick another with `--layout colemak` (a family) or `--layout en-colemak` (a layout id, standing for its family), or merge every family into one set of key stats with `--layout all`. The report names the family it imported and counts the sessions it skipped. Turkish Q (family `qwerty`) and Turkish F (`tr-tr-f`) are separate families, so a mixed Turkish export imports only the latest of the two unless you pass `--layout all`.
 - Existing local stats are never overwritten unless you pass `--force`, which still writes a `.bak` backup of that language's stats file first.
 
 ## Languages
 
-English and Turkish are supported. Each uses keybr.com's own data for that language: its phonetic model, its word list, and its letter order (Turkish starts from `a e i n ı r`). The heatmap shows the language's whole alphabet, with dotted and dotless i as separate keys (`İ` and `I`).
+English, Turkish and German are supported. Each uses keybr.com's own data for that language: its phonetic model, its word list, and its letter order (Turkish starts from `a e i n ı r`, German from `e n t i r l`). The heatmap shows the language's whole alphabet, with Turkish dotted and dotless i as separate keys (`İ` and `I`) and German `ß` shown as `ẞ`.
 
 ```bash
 keybr-tui --language tr   # switch to Turkish; later runs remember it
+keybr-tui --language de   # or German
 keybr-tui --language en   # back to English
 ```
 
-Each language keeps its own stats (`stats.json` for English, `stats-tr.json` for Turkish), so switching never mixes them. Combination drills (`focus_pattern`) are English-only. Typing Turkish needs a Turkish keyboard layout in your OS and a UTF-8 terminal.
+Each language keeps its own stats (`stats.json` for English, `stats-tr.json` for Turkish, `stats-de.json` for German), so switching never mixes them. Combination drills (`focus_pattern`) are English-only. Typing Turkish or German needs a keyboard layout for that language in your OS and a UTF-8 terminal.
 
 ## Configuration
 
@@ -145,7 +148,7 @@ fragment_length = 100
 | `alphabet_size` | `0.0` | Fraction of the non-starter alphabet to force-unlock regardless of confidence (keybr's `alphabetSize`), clamped to the range 0.0 to 1.0 |
 | `focus_letter` | `unset` | Pins one unlocked letter, given as a single lowercase letter of the practice alphabet, so every generated word contains it; omit the key (or cycle the Settings "Focus letter" row to Auto) for the automatic weakest-key focus |
 | `focus_pattern` | `unset` | Pins one combination drill: a bigram (`"cr"`, `"pl"`, `"br"`, `"tr"`, `"gr"`, `"fr"`, `"bl"`, `"cl"`) or a word ending (`"-ing"`, `"-ed"`, `"-er"`, `"-ly"`, `"-tion"`, `"-ment"`, `"-able"`, `"-ous"`), so every generated word matches it instead of just containing one letter; only takes effect while the pattern is on offer, meaning its letters are unlocked and the dictionary has at least 8 distinct words for it, and setting it clears `focus_letter` since the two share one focus slot |
-| `language` | `"en"` | Practice language: `"en"` or `"tr"`; `--language` sets it too |
+| `language` | `"en"` | Practice language: `"en"`, `"tr"` or `"de"`; `--language` sets it too |
 
 </details>
 

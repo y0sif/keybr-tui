@@ -15,6 +15,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Turkish case rules (`i` → `İ`, `ı` → `I`), and keeps its stats in its own
   `stats-tr.json`. `--import` replays the Turkish sessions of a keybr.com
   export when run with `--language tr`.
+- German practice language (`--language de` or `language = "de"` in
+  `config.toml`). It uses keybr.com's German phonetic model, word list
+  (without its capitalised words, which keybr.com's lessons never offer)
+  and frequency-derived letter order (starting `e n t i r l`), shows all 30
+  letters in the heatmap (`ß` as `ẞ`), and keeps its stats in its own
+  `stats-de.json`. `--import` replays the German sessions of a keybr.com
+  export when run with `--language de`.
+- `--layout <LAYOUT>` for `--import`: the keybr.com layout family to import,
+  given as a family (`colemak`), a layout id standing for its family
+  (`en-colemak`), or `all`. Sessions are matched to their language and
+  family with keybr.com's own layout table (98 layouts).
 
 ### Changed
 
@@ -23,6 +34,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   UTF-8 aware, and the unlock order, heatmap and import filter come from the
   practice language. English behaviour, files and generated text are
   unchanged.
+- `--import` now imports one layout family, as keybr.com keeps key stats
+  per family: by default the family of your most recent session in the
+  practice language. If your export has sessions on several families (for
+  example QWERTY and Colemak, or Turkish Q and Turkish F, which are separate
+  families), only the latest family is imported; `--layout all` restores
+  merging them. The report names the family imported and the sessions
+  skipped.
+
+### Fixed
+
+- The key heatmap wraps onto balanced rows on narrow terminals instead of
+  being cut off on the right (one row needed 90 columns for English, 99 for
+  Turkish, 102 for German).
 
 ## [0.2.4] - 2026-09-29
 

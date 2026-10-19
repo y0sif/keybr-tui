@@ -22,14 +22,15 @@ Direct file URL (master branch):
 
 ### Format
 
-Binary, big-endian-free (all multi-byte fields are little-endian):
+Binary. Multi-byte fields are big-endian, as keybr.com's reader
+(`packages/keybr-binary/lib/io.ts`) reads them:
 
 | Bytes        | Field                                                           |
 | ------------ | --------------------------------------------------------------- |
 | `0..9`       | ASCII signature `keybr.com`                                     |
 | `9`          | Markov order (`4`)                                              |
 | `10`         | Alphabet size (`27`)                                            |
-| `11..65`     | 27 × `u16 LE` code points: `0x0020`, `'a'`..`'z'`               |
+| `11..65`     | 27 × `u16 BE` code points: `0x0020`, `'a'`..`'z'`               |
 | `65..end`    | Sparse segments — one per `(order - 1)`-character history       |
 
 Each segment is encoded as:
@@ -45,6 +46,12 @@ zero-length segments. See
 `packages/keybr-phonetic-model/lib/transitiontable.ts` upstream for the
 canonical encoder/decoder.
 
+The letters and their unlock order are read from the file itself, for
+every language: the letters from the alphabet header, the unlock order as
+keybr.com's `Letter.frequencyOrder` (each letter's frequencies summed over
+all segments, highest first). See `ModelLetters` in
+`src/engine/transition.rs`.
+
 ### License
 
 The keybr.com source code is licensed under the [GNU AGPLv3](https://github.com/aradzie/keybr.com/blob/master/LICENSE.md).
@@ -59,9 +66,23 @@ The Turkish model, same format: order 4, alphabet size 30 (space followed
 by `abcçdefgğhıijklmnoöprsştuüvyz`, code points stored big-endian like the
 English file). Copied verbatim from
 `packages/keybr-phonetic-model/assets/model-tr.data` in the keybr.com
-source tree. The Turkish unlock order in `src/engine/language.rs` is
-keybr.com's `Letter.frequencyOrder` over this file, and a test re-derives
-it.
+source tree. Its unlock order (`a e i n ı r` first) is read from it as
+above, and a test in `src/engine/language.rs` pins it.
+
+## `model-de.data`
+
+The German model, same format: order 4, alphabet size 31 (space followed
+by `aäbcdefghijklmnoöpqrstuüvwxyzß`, code points stored big-endian).
+Copied verbatim from
+`packages/keybr-phonetic-model/assets/model-de.data` in the keybr.com
+source tree.
+
+Direct file URL (master branch):
+<https://raw.githubusercontent.com/aradzie/keybr.com/master/packages/keybr-phonetic-model/assets/model-de.data>
+
+Its unlock order, read from it as above, is
+`e n t i r l h a s c g u m o f d k b p z ü ä ß w ö v y q x j`; a test in
+`src/engine/language.rs` pins it. Same licence as the English model.
 
 ## `wordlist-en.txt`
 
@@ -119,3 +140,47 @@ characters and 2 are single letters (`u`, `ü`).
 ### License
 
 Same upstream licence as above — keybr.com is GNU AGPLv3.
+
+## `wordlist-de.txt`
+
+Real German words for the natural-words blend.
+
+### Source
+
+keybr.com's `packages/keybr-content-words/lib/data/words-de.json`
+(10,000 words).
+
+Direct file URL (master branch):
+<https://raw.githubusercontent.com/aradzie/keybr.com/master/packages/keybr-content-words/lib/data/words-de.json>
+
+### Normalisation
+
+- JSON string array → one word per line, UTF-8, upstream order kept
+- Only words made of the 30 lowercase German letters
+  (`aäbcdefghijklmnoöpqrstuüvwxyzß`) kept. Capitalised words are dropped,
+  not lowercased: keybr.com's lessons only offer words made of the
+  lesson's letters (`filterWordList` in
+  `packages/keybr-lesson/lib/dictionary.ts`), which are lowercase, so it
+  never shows them either
+- Length filtered to 2..=12 characters (characters, not bytes)
+- No duplicates to remove
+
+Result: 5,559 lines. Of the 4,441 dropped words, 4,242 are capitalised and
+199 are longer than 12 characters.
+
+### License
+
+Same upstream licence as above: keybr.com is GNU AGPLv3.
+
+## Layout table (`src/engine/layout.rs`)
+
+Not a file in this directory, but data copied from keybr.com all the same.
+`LAYOUTS` in `src/engine/layout.rs` is keybr.com's `Layout.ALL`: 98
+layouts, each with its id, language and family, which `--import` uses to
+pick a session's language and layout family. Taken from
+`packages/keybr-keyboard/lib/layout.ts` (language ids from
+`packages/keybr-keyboard/lib/language.ts`) at commit `05a37bc`:
+<https://github.com/aradzie/keybr.com/blob/05a37bc5265f65ff538c59c613db29442f345d51/packages/keybr-keyboard/lib/layout.ts>
+
+The module comment says how to regenerate it. Same upstream licence:
+keybr.com is GNU AGPLv3.

@@ -132,9 +132,10 @@ fn typing_nodes(app: &App) -> Vec<Node> {
         Node::new("stat-accuracy", Role::Text)
             .label("Accuracy")
             .value(format!("{:.0}%", app.lesson_accuracy())),
-        // The dashboard's 26-tile heatmap. Its whole meaning is carried by
-        // background colors an agent cannot see, which is what `Chart` is
-        // for: publish the confidences the colors were made from.
+        // The dashboard's heatmap, one tile per letter of the practice
+        // alphabet. Its whole meaning is carried by background colors an
+        // agent cannot see, which is what `Chart` is for: publish the
+        // confidences the colors were made from.
         Node::new("key-heatmap", Role::Chart)
             .label("All keys — confidence per unlocked letter")
             .value(heatmap_value(app)),
