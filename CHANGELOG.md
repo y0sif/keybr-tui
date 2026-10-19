@@ -22,8 +22,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   letters in the heatmap (`ß` as `ẞ`), and keeps its stats in its own
   `stats-de.json`. `--import` replays the German sessions of a keybr.com
   export when German is the practice language.
-- A Language row in Settings, the last row, cycling English, Türkçe and
-  Deutsch with Left/Right. Switching takes effect at once, the same as
+- 24 more practice languages, for 27 in all: Armenian, Belarusian,
+  Croatian, Czech, Danish, Dutch, English (UK), Estonian, Finnish, French,
+  Greek, Hungarian, Italian, Latvian, Lithuanian, Norwegian Bokmål, Polish,
+  Portuguese, Romanian, Russian, Slovenian, Spanish, Swedish and Ukrainian.
+  Each uses keybr.com's phonetic model, word list and frequency-derived
+  letter order, and keeps its stats in its own `stats-<code>.json`.
+  `--language` takes the code (`fr`, `en-gb`) or the name in English or in
+  the language itself (`french`, `français`). English (UK) has the English
+  combination drills; the others have none. Greek tiles keep their accented
+  capitals (`Ά Έ Ή Ί Ό Ύ Ώ`) and show final sigma as `ς`, so every tile is
+  distinct (on keybr.com seven pairs look alike); Armenian `և` shows as
+  `ԵՎ`. keybr.com has no layouts of its own for English (UK) and Croatian,
+  and an export records only the layout, so `--import` finds no sessions
+  for them and says why.
+- A Language row in Settings, the last row, cycling through the practice
+  languages by their own names (English, Türkçe, Deutsch, Français and so
+  on) with Left/Right. Switching takes effect at once, the same as
   relaunching with `--language`: the current language's stats are saved,
   the chosen language's own stats load (its unlocked letters, key speeds
   and history), the next lesson is in that language, and `config.toml`
@@ -52,8 +67,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - The key heatmap wraps onto balanced rows on narrow terminals instead of
-  being cut off on the right (one row needed 90 columns for English, 99 for
-  Turkish, 102 for German).
+  being cut off on the right (one row needed 90 columns for English, and up
+  to 129 for Czech and Armenian).
+- The Progress screen scrolls when its letter list is taller than the
+  terminal, instead of cutting off the letters past the bottom (English
+  needed 33 rows to show all 26). Up/Down, PageUp/PageDown, Home and End
+  move it; a line below the list then says how many letters are above and
+  below, and the footer shows `[Up/Down] Scroll`.
 
 ## [0.2.4] - 2026-09-29
 
