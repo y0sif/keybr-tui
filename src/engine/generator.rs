@@ -897,6 +897,26 @@ mod tests {
     }
 
     #[test]
+    fn word_length_bounds_count_characters_not_bytes() {
+        // 'ü' takes two bytes in UTF-8, and a focused word carries it in
+        // its first three letters, so a length bound counted in bytes
+        // would stop every such word at nine letters. The full alphabet
+        // makes long words common enough to reach the bound.
+        let keys: Vec<char> = Language::Turkish.letters().to_vec();
+        let filter = LetterFilter::new(&keys, Some(FocusRule::Key('ü')));
+        let mut gen = WordGenerator::with_seed_for(42, Language::Turkish);
+        let lens: Vec<usize> = (0..1000)
+            .map(|_| gen.phonetic_next_word(&filter).chars().count())
+            .collect();
+        assert!(
+            lens.iter()
+                .all(|n| (MIN_WORD_LEN..=MAX_WORD_LEN).contains(n)),
+            "{lens:?}"
+        );
+        assert_eq!(lens.iter().max(), Some(&MAX_WORD_LEN), "{lens:?}");
+    }
+
+    #[test]
     fn turkish_natural_words_are_real_turkish_words() {
         let keys: Vec<char> = Language::Turkish.letters().to_vec();
         let filter = LetterFilter::new(&keys, None);
