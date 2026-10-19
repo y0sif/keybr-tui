@@ -59,16 +59,29 @@ struct Cli {
     #[arg(long)]
     force: bool,
 
-    /// Practice language: "en" (default) or "tr". Saved to config.toml, so
-    /// later runs keep it. Each language keeps its own stats.
-    #[arg(long, value_name = "CODE", value_parser = parse_language)]
+    // Practice language; the help text lists the codes (`language_help`).
+    #[arg(long, value_name = "CODE", value_parser = parse_language, help = language_help())]
     language: Option<Language>,
+}
+
+/// Help for `--language`, listing the codes from the language table so it
+/// never goes stale when a language is added.
+fn language_help() -> String {
+    format!(
+        "Practice language: {} (default en). Saved to config.toml, so later runs keep it. Each language keeps its own stats.",
+        Language::supported_codes()
+    )
 }
 
 /// Clap parser for `--language`: an unknown code is rejected on the spot,
 /// with the usual clap error, since the user is right there to fix it.
 fn parse_language(code: &str) -> Result<Language, String> {
-    Language::from_code(code).ok_or_else(|| "unknown language (supported: en, tr)".to_string())
+    Language::from_code(code).ok_or_else(|| {
+        format!(
+            "unknown language (supported: {})",
+            Language::supported_codes()
+        )
+    })
 }
 
 /// Resolve the practice language: `--language` wins over the config file.
@@ -335,6 +348,14 @@ mod tests {
             resolve_language(None, &config_with("xx")),
             Language::English
         );
+    }
+
+    #[test]
+    fn language_flag_lists_every_supported_code() {
+        assert_eq!(parse_language("de"), Ok(Language::German));
+        let err = parse_language("xx").unwrap_err();
+        assert!(err.contains("en, tr, de"), "{err}");
+        assert!(language_help().contains("en, tr, de"));
     }
 
     #[test]

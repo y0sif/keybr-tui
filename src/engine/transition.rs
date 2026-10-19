@@ -25,6 +25,11 @@
 //!
 //! Frequencies in each segment sum to 255 (or 0 for impossible histories).
 //!
+//! The alphabet header is the language's own alphabet (keybr.com writes it
+//! as `[space, ...Language.alphabet]`), so the letters and their unlock
+//! order are read from the file ([`ModelLetters`]) rather than kept beside
+//! it, and a header is checked for its shape instead of against a list.
+//!
 //! At load time we decode the sparse representation into a dense
 //! `Vec<u8>` of length `alphabet_size^order` (≈ 519 KiB for English),
 //! flattened in row-major order so segment lookup is a single index
@@ -74,124 +79,36 @@ impl TransitionTable {
     /// or malformed — this is a build-time/asset failure and not
     /// something the runtime should attempt to recover from.
     pub fn for_language(language: Language) -> Self {
-        Self::from_bytes(language.model_bytes(), language.letters())
+        Self::from_bytes(language.model_bytes())
             .unwrap_or_else(|e| panic!("embedded model-{}.data is malformed: {e}", language.code()))
     }
 
-    /// Decode a transition table from a raw byte slice whose alphabet must
-    /// be space followed by exactly `letters`, in that order.
+    /// Decode a transition table from a raw byte slice. The alphabet is the
+    /// file's own; see `read_header` for what makes it well-formed.
     ///
     /// Returns an error string describing the first malformed field
     /// encountered, suitable for `expect()` in callers.
-    pub fn from_bytes(bytes: &[u8], letters: &[char]) -> Result<Self, String> {
-        let mut cursor = 0usize;
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
+        let header = read_header(bytes)?;
+        let alphabet_size = header.alphabet.len();
 
-        // --- Signature ---
-        if bytes.len() < SIGNATURE.len() {
-            return Err("file too short for signature".into());
-        }
-        if &bytes[..SIGNATURE.len()] != SIGNATURE {
-            return Err("missing keybr.com signature".into());
-        }
-        cursor += SIGNATURE.len();
-
-        // --- Chain header ---
-        if bytes.len() < cursor + 2 {
-            return Err("file too short for chain header".into());
-        }
-        let order = bytes[cursor] as usize;
-        cursor += 1;
-        let alphabet_size = bytes[cursor] as usize;
-        cursor += 1;
-
-        if order != EXPECTED_ORDER {
-            return Err(format!("unsupported order {} (expected 4)", order));
-        }
-        let expected_size = letters.len() + 1;
-        if alphabet_size != expected_size {
-            return Err(format!(
-                "unsupported alphabet size {} (expected {})",
-                alphabet_size, expected_size
-            ));
-        }
-
-        // --- Alphabet (u16 BE per code point — upstream serializer is big-endian) ---
-        let alphabet_bytes = alphabet_size * 2;
-        if bytes.len() < cursor + alphabet_bytes {
-            return Err("file too short for alphabet".into());
-        }
-        let mut alphabet = Vec::with_capacity(alphabet_size);
-        for i in 0..alphabet_size {
-            let hi = bytes[cursor + i * 2] as u16;
-            let lo = bytes[cursor + i * 2 + 1] as u16;
-            let code_point = (hi << 8) | lo;
-            let expected = if i == 0 { ' ' } else { letters[i - 1] };
-            if u32::from(code_point) != expected as u32 {
-                return Err(format!(
-                    "unexpected alphabet code point at slot {}: 0x{:04x} (expected 0x{:04x})",
-                    i, code_point, expected as u32
-                ));
-            }
-            alphabet.push(expected);
-        }
-        cursor += alphabet_bytes;
-        let index = alphabet.iter().enumerate().map(|(i, &c)| (c, i)).collect();
-
-        // --- Segments ---
         // For order N, there are size^(N-1) segments, each of length size.
-        let segment_count = alphabet_size.pow((order - 1) as u32);
-        let dense_len = segment_count * alphabet_size;
-        let mut data = vec![0u8; dense_len];
+        let segment_count = alphabet_size.pow((header.order - 1) as u32);
+        let mut data = vec![0u8; segment_count * alphabet_size];
+        read_segments(bytes, &header, |seg, index, freq| {
+            data[seg * alphabet_size + index] = freq;
+        })?;
 
-        for seg in 0..segment_count {
-            if cursor >= bytes.len() {
-                return Err(format!("file truncated at segment {}", seg));
-            }
-            let entry_count = bytes[cursor] as usize;
-            cursor += 1;
-            if entry_count > alphabet_size {
-                return Err(format!(
-                    "segment {} has {} entries (max {})",
-                    seg, entry_count, alphabet_size
-                ));
-            }
-            if bytes.len() < cursor + entry_count * 2 {
-                return Err(format!("file truncated in segment {} body", seg));
-            }
-            let segment_start = seg * alphabet_size;
-            for _ in 0..entry_count {
-                let index = bytes[cursor] as usize;
-                let freq = bytes[cursor + 1];
-                cursor += 2;
-                if index >= alphabet_size {
-                    return Err(format!(
-                        "segment {} entry has alphabet index {} (max {})",
-                        seg,
-                        index,
-                        alphabet_size - 1
-                    ));
-                }
-                if freq == 0 {
-                    return Err(format!(
-                        "segment {} contains zero-frequency entry (sparse format must omit)",
-                        seg
-                    ));
-                }
-                data[segment_start + index] = freq;
-            }
-        }
-
-        if cursor != bytes.len() {
-            return Err(format!(
-                "trailing {} unused bytes after segments",
-                bytes.len() - cursor
-            ));
-        }
-
+        let index = header
+            .alphabet
+            .iter()
+            .enumerate()
+            .map(|(i, &c)| (c, i))
+            .collect();
         Ok(Self {
-            order,
+            order: header.order,
             alphabet_size,
-            alphabet,
+            alphabet: header.alphabet,
             index,
             data,
         })
@@ -270,6 +187,185 @@ impl TransitionTable {
     }
 }
 
+/// The letters a model teaches, read in one pass over its bytes without
+/// building the dense table, so a language knows them before (or without)
+/// any generator.
+pub struct ModelLetters {
+    /// The alphabet after its leading space, in header order: keybr.com's
+    /// `Language.alphabet`, the display order.
+    pub letters: Vec<char>,
+    /// keybr.com's `Letter.frequencyOrder` over `TransitionTable.letters`:
+    /// each letter's frequencies summed over every segment, highest total
+    /// first, ties by code point.
+    pub frequency_order: Vec<char>,
+}
+
+impl ModelLetters {
+    /// Read the letters of a model file, checking the whole file the same
+    /// way `TransitionTable::from_bytes` does.
+    pub fn read(bytes: &[u8]) -> Result<Self, String> {
+        let header = read_header(bytes)?;
+        let alphabet = &header.alphabet;
+        let mut totals = vec![0u64; alphabet.len()];
+        read_segments(bytes, &header, |_, index, freq| {
+            totals[index] += u64::from(freq);
+        })?;
+        // Index 0 is space, which keybr.com drops before sorting.
+        let mut order: Vec<usize> = (1..alphabet.len()).collect();
+        order.sort_by(|&a, &b| {
+            totals[b]
+                .cmp(&totals[a])
+                .then(alphabet[a].cmp(&alphabet[b]))
+        });
+        Ok(Self {
+            letters: alphabet[1..].to_vec(),
+            frequency_order: order.into_iter().map(|i| alphabet[i]).collect(),
+        })
+    }
+}
+
+/// Signature, chain header and alphabet of a model file.
+struct Header {
+    order: usize,
+    /// Space, then the letters.
+    alphabet: Vec<char>,
+    /// Offset of the first segment.
+    body: usize,
+}
+
+/// Read the signature, chain header and alphabet. The alphabet is the
+/// file's own, so it is checked for its shape: space first, then distinct
+/// letters that are not uppercase (caseless scripts pass).
+fn read_header(bytes: &[u8]) -> Result<Header, String> {
+    let mut cursor = 0usize;
+
+    // --- Signature ---
+    if bytes.len() < SIGNATURE.len() {
+        return Err("file too short for signature".into());
+    }
+    if &bytes[..SIGNATURE.len()] != SIGNATURE {
+        return Err("missing keybr.com signature".into());
+    }
+    cursor += SIGNATURE.len();
+
+    // --- Chain header ---
+    if bytes.len() < cursor + 2 {
+        return Err("file too short for chain header".into());
+    }
+    let order = bytes[cursor] as usize;
+    cursor += 1;
+    let alphabet_size = bytes[cursor] as usize;
+    cursor += 1;
+
+    if order != EXPECTED_ORDER {
+        return Err(format!("unsupported order {} (expected 4)", order));
+    }
+    if alphabet_size < 2 {
+        return Err(format!(
+            "unsupported alphabet size {} (expected space and at least one letter)",
+            alphabet_size
+        ));
+    }
+
+    // --- Alphabet (u16 BE per code point — upstream serializer is big-endian) ---
+    let alphabet_bytes = alphabet_size * 2;
+    if bytes.len() < cursor + alphabet_bytes {
+        return Err(format!(
+            "file too short for an alphabet of {} code points",
+            alphabet_size
+        ));
+    }
+    let mut alphabet: Vec<char> = Vec::with_capacity(alphabet_size);
+    for i in 0..alphabet_size {
+        let at = cursor + i * 2;
+        let code_point = u16::from_be_bytes([bytes[at], bytes[at + 1]]);
+        let c = char::from_u32(u32::from(code_point))
+            .ok_or_else(|| format!("alphabet slot {i} is 0x{code_point:04x}, not a character"))?;
+        if i == 0 && c != ' ' {
+            return Err(format!(
+                "alphabet slot 0 is U+{code_point:04X} {c:?}, expected space"
+            ));
+        }
+        if i > 0 && (!c.is_alphabetic() || c.is_uppercase()) {
+            return Err(format!(
+                "alphabet slot {i} is U+{code_point:04X} {c:?}, not a lowercase letter"
+            ));
+        }
+        if let Some(first) = alphabet.iter().position(|&a| a == c) {
+            return Err(format!(
+                "alphabet slot {i} repeats U+{code_point:04X} {c:?} from slot {first}"
+            ));
+        }
+        alphabet.push(c);
+    }
+    cursor += alphabet_bytes;
+
+    Ok(Header {
+        order,
+        alphabet,
+        body: cursor,
+    })
+}
+
+/// Walk the sparse segments after `header` to the end of the file, checking
+/// each one, and hand every entry to `visit` as
+/// `(segment, alphabet index, frequency)`.
+fn read_segments(
+    bytes: &[u8],
+    header: &Header,
+    mut visit: impl FnMut(usize, usize, u8),
+) -> Result<(), String> {
+    let alphabet_size = header.alphabet.len();
+    let mut cursor = header.body;
+
+    // For order N, there are size^(N-1) segments, each of length size.
+    let segment_count = alphabet_size.pow((header.order - 1) as u32);
+    for seg in 0..segment_count {
+        if cursor >= bytes.len() {
+            return Err(format!("file truncated at segment {}", seg));
+        }
+        let entry_count = bytes[cursor] as usize;
+        cursor += 1;
+        if entry_count > alphabet_size {
+            return Err(format!(
+                "segment {} has {} entries (max {})",
+                seg, entry_count, alphabet_size
+            ));
+        }
+        if bytes.len() < cursor + entry_count * 2 {
+            return Err(format!("file truncated in segment {} body", seg));
+        }
+        for _ in 0..entry_count {
+            let index = bytes[cursor] as usize;
+            let freq = bytes[cursor + 1];
+            cursor += 2;
+            if index >= alphabet_size {
+                return Err(format!(
+                    "segment {} entry has alphabet index {} (max {})",
+                    seg,
+                    index,
+                    alphabet_size - 1
+                ));
+            }
+            if freq == 0 {
+                return Err(format!(
+                    "segment {} contains zero-frequency entry (sparse format must omit)",
+                    seg
+                ));
+            }
+            visit(seg, index, freq);
+        }
+    }
+
+    if cursor != bytes.len() {
+        return Err(format!(
+            "trailing {} unused bytes after segments",
+            bytes.len() - cursor
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -311,14 +407,50 @@ mod tests {
     }
 
     #[test]
-    fn rejects_a_model_for_another_alphabet() {
-        let err = TransitionTable::from_bytes(
-            Language::Turkish.model_bytes(),
-            Language::English.letters(),
-        )
-        .err()
-        .expect("a Turkish model must not load as English");
-        assert!(err.contains("alphabet size"), "{err}");
+    fn loads_german_model() {
+        let table = TransitionTable::for_language(Language::German);
+        assert_eq!(table.alphabet_size(), 31);
+        for c in ['ä', 'ö', 'ü', 'ß'] {
+            let idx = table.char_to_idx(c).expect("umlauts and ß are letters");
+            assert_eq!(table.idx_to_char(idx), c);
+        }
+        assert_eq!(table.char_to_idx('ẞ'), None);
+    }
+
+    /// The English model with alphabet slot `slot` set to `c`.
+    fn with_alphabet_slot(slot: usize, c: char) -> Vec<u8> {
+        let mut bytes = Language::English.model_bytes().to_vec();
+        let at = SIGNATURE.len() + 2 + slot * 2;
+        bytes[at..at + 2].copy_from_slice(&(c as u16).to_be_bytes());
+        bytes
+    }
+
+    #[test]
+    fn rejects_a_malformed_alphabet() {
+        let cases = [
+            (with_alphabet_slot(0, 'a'), "expected space"),
+            (with_alphabet_slot(2, 'a'), "repeats U+0061 'a' from slot 1"),
+            (with_alphabet_slot(5, 'E'), "not a lowercase letter"),
+            (with_alphabet_slot(5, '-'), "not a lowercase letter"),
+            (with_alphabet_slot(5, ' '), "not a lowercase letter"),
+        ];
+        for (bytes, expected) in cases {
+            let err = TransitionTable::from_bytes(&bytes)
+                .err()
+                .expect("a malformed alphabet must not load");
+            assert!(err.contains(expected), "{err}");
+            let err = ModelLetters::read(&bytes).err().expect("nor yield letters");
+            assert!(err.contains(expected), "{err}");
+        }
+
+        // A size byte that disagrees with the data runs the segments off
+        // their boundaries.
+        let mut bytes = Language::English.model_bytes().to_vec();
+        bytes[SIGNATURE.len() + 1] = 26;
+        assert!(TransitionTable::from_bytes(&bytes).is_err());
+        bytes[SIGNATURE.len() + 1] = 1;
+        let err = ModelLetters::read(&bytes).err().unwrap();
+        assert!(err.contains("alphabet size 1"), "{err}");
     }
 
     #[test]

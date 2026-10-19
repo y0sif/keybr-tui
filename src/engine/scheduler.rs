@@ -4,8 +4,9 @@ use crate::engine::language::Language;
 use crate::metrics::KeyStats;
 
 /// English letter progression order, mirroring keybr.com. Kept as a named
-/// constant because the English tests are written against it; other code
-/// asks the scheduler's language (`Language::unlock_order`).
+/// static because the English tests are written against it; other code
+/// asks the scheduler's language (`Language::unlock_order`), which reads it
+/// from the model.
 ///
 /// The order drives both:
 ///   * the **starter set** — the first `STARTER_COUNT` letters are unlocked at launch.
@@ -15,7 +16,8 @@ use crate::metrics::KeyStats;
 /// The focused key is independent of this order: it's the active letter with the
 /// lowest historical-best confidence still below target (this order only breaks ties).
 #[cfg(test)]
-pub const UNLOCK_ORDER: &[char] = Language::English.unlock_order_const();
+pub static UNLOCK_ORDER: std::sync::LazyLock<&'static [char]> =
+    std::sync::LazyLock::new(|| Language::English.unlock_order());
 
 const STARTER_COUNT: usize = 6;
 
@@ -354,7 +356,7 @@ mod tests {
         let mut stats = HashMap::new();
 
         // Every active key fast on both current and best…
-        for &key in UNLOCK_ORDER {
+        for &key in UNLOCK_ORDER.iter() {
             let mut ks = KeyStats::default();
             ks.attempts = 30;
             ks.filtered_time_ms = 0.8 * target_time; // current learned
