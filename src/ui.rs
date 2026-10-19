@@ -22,15 +22,16 @@ fn render_typing_screen(app: &App, frame: &mut Frame) {
     let area = frame.area();
 
     // Top-to-bottom layout:
-    //   Row A: 5-row dashboard (Metrics / All keys / Current / Daily / callout)
+    //   Row A: dashboard (Metrics / All keys / Current / Daily / callout):
+    //          5 rows, more when the heatmap wraps on a narrow terminal
     //   Row B: blank spacer so the dashboard doesn't crowd the typing area
     //   Row C: typing area, vertically centered inside the remaining space
     //   Row D: 1-row footer with key hints
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(5), // Row A: dashboard
-            Constraint::Length(1), // Row B: spacer
+            Constraint::Length(dashboard::height(app, area.width)), // Row A: dashboard
+            Constraint::Length(1),                                  // Row B: spacer
             Constraint::Min(0),    // Row C: typing area (centered internally)
             Constraint::Length(1), // Row D: footer
         ])
@@ -65,4 +66,101 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
 
     let para = Paragraph::new(Line::from(spans)).alignment(Alignment::Center);
     frame.render_widget(para, area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::Language;
+    use ratatui::{backend::TestBackend, buffer::Buffer, Terminal};
+
+    /// Render a fresh app's typing screen into a `width` x 30 buffer.
+    fn render_typing(language: Language, width: u16) -> (App, Buffer) {
+        let mut app = App::new_with_language(35, ErrorMode::ForgiveMistakes, None, language);
+        app.screen = AppScreen::Typing;
+        let mut terminal = Terminal::new(TestBackend::new(width, 30)).expect("terminal");
+        terminal.draw(|frame| view(&app, frame)).expect("draw");
+        let buffer = terminal.backend().buffer().clone();
+        (app, buffer)
+    }
+
+    fn row_text(buffer: &Buffer, y: u16) -> String {
+        (0..buffer.area.width)
+            .map(|x| buffer[(x, y)].symbol())
+            .collect()
+    }
+
+    /// The letters drawn on tiles (cells with a background color) in row
+    /// `y`, left to right.
+    fn tile_letters(buffer: &Buffer, y: u16) -> String {
+        (0..buffer.area.width)
+            .map(|x| &buffer[(x, y)])
+            .filter(|cell| cell.bg != Color::Reset && cell.symbol() != " ")
+            .map(|cell| cell.symbol())
+            .collect()
+    }
+
+    fn all_tiles(language: Language) -> String {
+        language
+            .letters()
+            .iter()
+            .map(|&c| language.upper(c))
+            .collect()
+    }
+
+    /// At 80 columns no language's heatmap fits on one row: every letter
+    /// still shows exactly once, in order, and the rows below it move
+    /// down instead of being drawn over.
+    #[test]
+    fn narrow_terminal_wraps_the_heatmap_without_losing_letters() {
+        for &language in Language::ALL {
+            let (app, buffer) = render_typing(language, 80);
+            let heatmap_rows = dashboard::height(&app, 80) - 4;
+            assert_eq!(heatmap_rows, 2, "{language:?}");
+
+            let shown: String = (1..1 + heatmap_rows)
+                .map(|y| tile_letters(&buffer, y))
+                .collect();
+            assert_eq!(shown, all_tiles(language), "{language:?}");
+
+            // Wrapped rows share one left edge, so tile columns line up.
+            let first_tile_x = |y: u16| (0..80).find(|&x| buffer[(x, y)].bg != Color::Reset);
+            assert_eq!(first_tile_x(1), first_tile_x(2), "{language:?}");
+
+            // The band fills the 80 columns, so every label starts at x 0.
+            assert!(row_text(&buffer, 0).starts_with("Metrics:"));
+            assert!(row_text(&buffer, 1).starts_with("All keys:"));
+            assert!(row_text(&buffer, 3).starts_with("Current:"), "{language:?}");
+            assert!(
+                row_text(&buffer, 4).starts_with("Daily goal:"),
+                "{language:?}"
+            );
+            // Callout (blank on a fresh app) and spacer stay clear.
+            assert_eq!(row_text(&buffer, 5).trim(), "", "{language:?}");
+            assert_eq!(row_text(&buffer, 6).trim(), "", "{language:?}");
+            assert!(row_text(&buffer, 29).contains("Lesson 1"));
+        }
+    }
+
+    /// Wide enough for the single row, the dashboard keeps its five rows
+    /// and the heatmap sits centered on row 1, as it always has.
+    #[test]
+    fn wide_terminal_keeps_the_single_centered_row() {
+        for &language in Language::ALL {
+            let (app, buffer) = render_typing(language, 120);
+            assert_eq!(dashboard::height(&app, 120), 5, "{language:?}");
+
+            let letters = language.letters();
+            let band = 12 + letters.len() as u16 * 3;
+            let left = (120 - band) / 2;
+            // Everything left of the band is blank, so byte offset = column.
+            assert!(row_text(&buffer, 1)[left as usize..].starts_with("All keys:"));
+            for (i, &c) in letters.iter().enumerate() {
+                let x = left + 12 + 3 * i as u16 + 1;
+                assert_eq!(buffer[(x, 1)].symbol(), language.upper(c), "{language:?}");
+            }
+            assert_eq!(tile_letters(&buffer, 1), all_tiles(language));
+            assert!(row_text(&buffer, 2)[left as usize..].starts_with("Current:"));
+        }
+    }
 }

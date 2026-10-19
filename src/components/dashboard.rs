@@ -1,17 +1,26 @@
 //! The top dashboard strip on the typing screen.
 //!
 //! This is keybr.com's "progress and session summary" card translated to a
-//! TUI: four single-row sections stacked vertically, plus one row for the
-//! ephemeral "letter unlocked!" callout.
+//! TUI: four sections stacked vertically, plus one row for the ephemeral
+//! "letter unlocked!" callout. Every section is one row, except the
+//! heatmap when the terminal is too narrow for it (see `heatmap_rows`).
 //!
 //! Layout (each row, label-aligned):
 //!
 //! ```text
 //! Metrics:    94 wpm ↑+24  ·  99% acc ↑+3  ·  9,328 ↑+612
-//! All keys:   █E█N█I█A█R▓L▓T▓O▒S▒D▒Y▒C·G·H·P·M·K·B·W·F·Z·V·X·Q·J
-//! Current:    ░q   last 71 wpm 89%  ·  top 76 wpm 95%
+//! All keys:    A  B  C  D  E  F  G  H  I  J  K  L  M ... X  Y  Z
+//! Current:     Q    last 71 wpm 89%  ·  top 76 wpm 95%
 //! Daily goal: ▓▓▓▓▓░░░░░  53% / 30 min
 //! + 'b' unlocked!                       (only shown right after an unlock)
+//! ```
+//!
+//! The heatmap is one colored tile per letter, alphabetical. On a narrow
+//! terminal it splits into balanced rows under the same label:
+//!
+//! ```text
+//! All keys:    A  B  C  D  E  F  G  H  I  J  K  L  M
+//!              N  O  P  Q  R  S  T  U  V  W  X  Y  Z
 //! ```
 //!
 //! All deltas read from `App::lesson_history`, which is an in-memory rolling
@@ -39,23 +48,43 @@ const GOAL_BAR_CELLS: u32 = 10;
 
 /// Total width of the dashboard's content band: 12 cols for the label
 /// plus one three-cell heatmap tile per letter (78 cols for English's 26,
-/// 87 for Turkish's 29). All four rows align to this band so the labels
-/// sit in the same column on every line.
+/// 87 for Turkish's 29, 90 for German's 30). All four rows align to this
+/// band so the labels sit in the same column on every line.
 fn dashboard_width(app: &App) -> u16 {
     LABEL_WIDTH as u16 + app.language.letters().len() as u16 * key_bar::TILE_WIDTH
 }
 
+/// Rows the heatmap takes in a dashboard `width` cells wide: what
+/// `key_bar::rows_for` gives for the cells the tiles actually get, the
+/// band (clamped to the terminal) minus the label column.
+fn heatmap_rows(app: &App, width: u16) -> u16 {
+    let band = dashboard_width(app).min(width);
+    key_bar::rows_for(
+        app.language.letters().len(),
+        band.saturating_sub(LABEL_WIDTH as u16),
+    )
+}
+
+/// Height of the whole dashboard in a frame `width` cells wide: one row
+/// per section plus the callout, and the heatmap's extra rows when it
+/// wraps. The typing screen reserves exactly this, so a wrapped heatmap
+/// never runs into the typing area.
+pub fn height(app: &App, width: u16) -> u16 {
+    4 + heatmap_rows(app, width)
+}
+
 pub fn render(app: &App, frame: &mut Frame, area: Rect) {
-    // 5 single-line rows: 4 dashboard sections + 1 callout row that's
-    // either blank or shows the "+letter unlocked!" message.
+    // 4 dashboard sections + 1 callout row that's either blank or shows
+    // the "+letter unlocked!" message. Every row is one line except the
+    // heatmap, which takes more when it has to wrap.
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1), // Metrics
-            Constraint::Length(1), // All keys
-            Constraint::Length(1), // Current key
-            Constraint::Length(1), // Daily goal
-            Constraint::Length(1), // Callout (unlock) / blank
+            Constraint::Length(1),                             // Metrics
+            Constraint::Length(heatmap_rows(app, area.width)), // All keys
+            Constraint::Length(1),                             // Current key
+            Constraint::Length(1),                             // Daily goal
+            Constraint::Length(1),                             // Callout (unlock) / blank
         ])
         .split(area);
 
@@ -356,6 +385,67 @@ fn render_callout_row(app: &App, frame: &mut Frame, area: Rect) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::ErrorMode;
+    use crate::engine::Language;
+
+    /// Heatmap rows by terminal width. Each language keeps its one row
+    /// down to its full band (label + 3 cells a letter: 90, 99 and 102
+    /// columns) and wraps one column narrower.
+    #[test]
+    fn heatmap_rows_by_terminal_width() {
+        let cases: [(Language, &[(u16, u16)]); 3] = [
+            (
+                Language::English,
+                &[
+                    (120, 1),
+                    (102, 1),
+                    (99, 1),
+                    (90, 1),
+                    (89, 2),
+                    (80, 2),
+                    (60, 2),
+                    (50, 3),
+                ],
+            ),
+            (
+                Language::Turkish,
+                &[
+                    (120, 1),
+                    (102, 1),
+                    (99, 1),
+                    (98, 2),
+                    (90, 2),
+                    (80, 2),
+                    (60, 2),
+                    (50, 3),
+                ],
+            ),
+            (
+                Language::German,
+                &[
+                    (120, 1),
+                    (102, 1),
+                    (101, 2),
+                    (99, 2),
+                    (90, 2),
+                    (80, 2),
+                    (60, 2),
+                    (50, 3),
+                ],
+            ),
+        ];
+        for (language, widths) in cases {
+            let app = App::new_with_language(35, ErrorMode::ForgiveMistakes, None, language);
+            for &(width, rows) in widths {
+                assert_eq!(heatmap_rows(&app, width), rows, "{language:?} at {width}");
+                assert_eq!(height(&app, width), 4 + rows, "{language:?} at {width}");
+            }
+            // No room past the label: the row stays one (clipped) line.
+            for width in 0..=LABEL_WIDTH as u16 {
+                assert_eq!(heatmap_rows(&app, width), 1, "{language:?} at {width}");
+            }
+        }
+    }
 
     #[test]
     fn format_score_inserts_thousands_separators() {
