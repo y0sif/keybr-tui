@@ -179,18 +179,24 @@ mod tests {
     /// and the heatmap sits centered on row 1, as it always has.
     #[test]
     fn wide_terminal_keeps_the_single_centered_row() {
+        // Wide enough for the longest alphabet's row.
+        let longest = Language::ALL.iter().map(|l| l.letters().len()).max();
+        let width = 12 + longest.unwrap() as u16 * 3;
         for &language in Language::ALL {
-            let (app, buffer) = render_typing(language, 120);
-            assert_eq!(dashboard::height(&app, 120), 5, "{language:?}");
+            let (app, buffer) = render_typing(language, width);
+            assert_eq!(dashboard::height(&app, width), 5, "{language:?}");
 
             let letters = language.letters();
             let band = 12 + letters.len() as u16 * 3;
-            let left = (120 - band) / 2;
+            let left = (width - band) / 2;
             // Everything left of the band is blank, so byte offset = column.
             assert!(row_text(&buffer, 1)[left as usize..].starts_with("All keys:"));
+            // Trimmed, a tile is its label: one letter centered, or the
+            // two of Armenian `ԵՎ`.
             for (i, &c) in letters.iter().enumerate() {
-                let x = left + 12 + 3 * i as u16 + 1;
-                assert_eq!(buffer[(x, 1)].symbol(), language.upper(c), "{language:?}");
+                let x = left + 12 + 3 * i as u16;
+                let tile: String = (x..x + 3).map(|x| buffer[(x, 1)].symbol()).collect();
+                assert_eq!(tile.trim(), language.upper(c), "{language:?}");
             }
             assert_eq!(tile_letters(&buffer, 1), all_tiles(language));
             assert!(row_text(&buffer, 2)[left as usize..].starts_with("Current:"));

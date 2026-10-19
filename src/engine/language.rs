@@ -20,13 +20,38 @@ use crate::engine::transition::ModelLetters;
 pub enum Language {
     #[default]
     English,
-    Turkish,
+    EnglishUk,
+    Belarusian,
+    Czech,
+    Danish,
     German,
+    Greek,
+    Spanish,
+    Estonian,
+    Finnish,
+    French,
+    Croatian,
+    Hungarian,
+    Armenian,
+    Italian,
+    Lithuanian,
+    Latvian,
+    NorwegianBokmal,
+    Dutch,
+    Polish,
+    Portuguese,
+    Romanian,
+    Russian,
+    Slovenian,
+    Swedish,
+    Turkish,
+    Ukrainian,
 }
 
 /// Everything about a language that is data rather than code.
 struct LanguageSpec {
-    /// ISO 639-1 code: the config value and keybr.com's language id.
+    /// The config value: keybr.com's language id, lowercase (`en-gb` is
+    /// its `en-GB`).
     code: &'static str,
     /// Name shown in the UI, in the language itself.
     display_name: &'static str,
@@ -39,7 +64,8 @@ struct LanguageSpec {
     /// Combination drills (see `Language::focus_patterns`).
     focus_patterns: &'static [FocusRule],
     /// Uppercase forms that differ from Rust's locale-free
-    /// `to_uppercase`, as in keybr.com's `Language.letterName`.
+    /// `to_uppercase`, as in keybr.com's `Language.letterName` (Greek
+    /// aside, see its row).
     upper_overrides: &'static [(char, &'static str)],
     /// Lowercase forms that differ from Rust's locale-free `to_lowercase`.
     lower_overrides: &'static [(char, char)],
@@ -59,6 +85,263 @@ static SPECS: [LanguageSpec; Language::ALL.len()] = [
         lower_overrides: &[],
     },
     LanguageSpec {
+        code: "en-gb",
+        display_name: "English (UK)",
+        aliases: &["english (uk)", "en_gb", "british"],
+        model: include_bytes!("../../data/model-en-gb.data"),
+        wordlist: include_str!("../../data/wordlist-en-gb.txt"),
+        // English bigrams and endings, so the English drills apply.
+        focus_patterns: FOCUS_PATTERNS,
+        upper_overrides: &[],
+        lower_overrides: &[],
+    },
+    LanguageSpec {
+        code: "be",
+        display_name: "Беларуская",
+        aliases: &["belarusian", "беларуская"],
+        model: include_bytes!("../../data/model-be.data"),
+        wordlist: include_str!("../../data/wordlist-be.txt"),
+        focus_patterns: &[],
+        upper_overrides: &[],
+        lower_overrides: &[],
+    },
+    LanguageSpec {
+        code: "cs",
+        display_name: "Čeština",
+        aliases: &["czech", "čeština"],
+        model: include_bytes!("../../data/model-cs.data"),
+        wordlist: include_str!("../../data/wordlist-cs.txt"),
+        focus_patterns: &[],
+        upper_overrides: &[],
+        lower_overrides: &[],
+    },
+    LanguageSpec {
+        code: "da",
+        display_name: "Dansk",
+        aliases: &["danish", "dansk"],
+        model: include_bytes!("../../data/model-da.data"),
+        wordlist: include_str!("../../data/wordlist-da.txt"),
+        focus_patterns: &[],
+        upper_overrides: &[],
+        lower_overrides: &[],
+    },
+    LanguageSpec {
+        code: "de",
+        display_name: "Deutsch",
+        aliases: &["german", "deutsch"],
+        model: include_bytes!("../../data/model-de.data"),
+        wordlist: include_str!("../../data/wordlist-de.txt"),
+        focus_patterns: &[],
+        // keybr.com shows the capital Eszett; Rust would give "SS".
+        upper_overrides: &[('ß', "ẞ")],
+        lower_overrides: &[],
+    },
+    LanguageSpec {
+        code: "el",
+        display_name: "Ελληνικά",
+        aliases: &["greek", "ελληνικά"],
+        model: include_bytes!("../../data/model-el.data"),
+        wordlist: include_str!("../../data/wordlist-el.txt"),
+        focus_patterns: &[],
+        // Deliberately not keybr.com's tiles. Its Greek uppercase drops
+        // the tonos (`ά` shows as `Α`, the tile of `α`) and gives `ς` the
+        // `Σ` of `σ`, so seven pairs of tiles look alike there. Rust keeps
+        // the accented capitals (`Ά Έ Ή Ί Ό Ύ Ώ`), and final sigma shows
+        // as itself.
+        upper_overrides: &[('ς', "ς")],
+        lower_overrides: &[],
+    },
+    LanguageSpec {
+        code: "es",
+        display_name: "Español",
+        aliases: &["spanish", "español"],
+        model: include_bytes!("../../data/model-es.data"),
+        wordlist: include_str!("../../data/wordlist-es.txt"),
+        focus_patterns: &[],
+        upper_overrides: &[],
+        lower_overrides: &[],
+    },
+    LanguageSpec {
+        code: "et",
+        display_name: "Eesti",
+        aliases: &["estonian", "eesti"],
+        model: include_bytes!("../../data/model-et.data"),
+        wordlist: include_str!("../../data/wordlist-et.txt"),
+        focus_patterns: &[],
+        upper_overrides: &[],
+        lower_overrides: &[],
+    },
+    LanguageSpec {
+        code: "fi",
+        display_name: "Suomi",
+        aliases: &["finnish", "suomi"],
+        model: include_bytes!("../../data/model-fi.data"),
+        wordlist: include_str!("../../data/wordlist-fi.txt"),
+        focus_patterns: &[],
+        upper_overrides: &[],
+        lower_overrides: &[],
+    },
+    LanguageSpec {
+        code: "fr",
+        display_name: "Français",
+        aliases: &["french", "français"],
+        model: include_bytes!("../../data/model-fr.data"),
+        wordlist: include_str!("../../data/wordlist-fr.txt"),
+        focus_patterns: &[],
+        upper_overrides: &[],
+        lower_overrides: &[],
+    },
+    LanguageSpec {
+        code: "hr",
+        display_name: "Hrvatski",
+        aliases: &["croatian", "hrvatski"],
+        model: include_bytes!("../../data/model-hr.data"),
+        wordlist: include_str!("../../data/wordlist-hr.txt"),
+        focus_patterns: &[],
+        upper_overrides: &[],
+        lower_overrides: &[],
+    },
+    LanguageSpec {
+        code: "hu",
+        display_name: "Magyar",
+        aliases: &["hungarian", "magyar"],
+        model: include_bytes!("../../data/model-hu.data"),
+        wordlist: include_str!("../../data/wordlist-hu.txt"),
+        focus_patterns: &[],
+        upper_overrides: &[],
+        lower_overrides: &[],
+    },
+    LanguageSpec {
+        code: "hy",
+        display_name: "Հայերեն",
+        aliases: &["armenian", "հայերեն"],
+        model: include_bytes!("../../data/model-hy.data"),
+        wordlist: include_str!("../../data/wordlist-hy.txt"),
+        focus_patterns: &[],
+        // The ligature `և` has no capital letter. keybr.com shows it as
+        // `ԵՎ`, as reformed spelling capitalises it; Rust would give
+        // `ԵՒ`. Its tile is the one two-letter label. No single capital
+        // lowercases back to it, so a pin on it is written as `և`.
+        upper_overrides: &[('և', "ԵՎ")],
+        lower_overrides: &[],
+    },
+    LanguageSpec {
+        code: "it",
+        display_name: "Italiano",
+        aliases: &["italian", "italiano"],
+        model: include_bytes!("../../data/model-it.data"),
+        wordlist: include_str!("../../data/wordlist-it.txt"),
+        focus_patterns: &[],
+        upper_overrides: &[],
+        lower_overrides: &[],
+    },
+    LanguageSpec {
+        code: "lt",
+        display_name: "Lietuvių",
+        aliases: &["lithuanian", "lietuvių"],
+        model: include_bytes!("../../data/model-lt.data"),
+        wordlist: include_str!("../../data/wordlist-lt.txt"),
+        focus_patterns: &[],
+        upper_overrides: &[],
+        lower_overrides: &[],
+    },
+    LanguageSpec {
+        code: "lv",
+        display_name: "Latviešu",
+        aliases: &["latvian", "latviešu"],
+        model: include_bytes!("../../data/model-lv.data"),
+        wordlist: include_str!("../../data/wordlist-lv.txt"),
+        focus_patterns: &[],
+        upper_overrides: &[],
+        lower_overrides: &[],
+    },
+    LanguageSpec {
+        code: "nb",
+        display_name: "Norsk bokmål",
+        aliases: &[
+            "norwegian bokmål",
+            "norsk bokmål",
+            "norwegian",
+            "bokmål",
+            "bokmal",
+        ],
+        model: include_bytes!("../../data/model-nb.data"),
+        wordlist: include_str!("../../data/wordlist-nb.txt"),
+        focus_patterns: &[],
+        upper_overrides: &[],
+        lower_overrides: &[],
+    },
+    LanguageSpec {
+        code: "nl",
+        display_name: "Nederlands",
+        aliases: &["dutch", "nederlands"],
+        model: include_bytes!("../../data/model-nl.data"),
+        wordlist: include_str!("../../data/wordlist-nl.txt"),
+        focus_patterns: &[],
+        upper_overrides: &[],
+        lower_overrides: &[],
+    },
+    LanguageSpec {
+        code: "pl",
+        display_name: "Polski",
+        aliases: &["polish", "polski"],
+        model: include_bytes!("../../data/model-pl.data"),
+        wordlist: include_str!("../../data/wordlist-pl.txt"),
+        focus_patterns: &[],
+        upper_overrides: &[],
+        lower_overrides: &[],
+    },
+    LanguageSpec {
+        code: "pt",
+        display_name: "Português",
+        aliases: &["portuguese", "português"],
+        model: include_bytes!("../../data/model-pt.data"),
+        wordlist: include_str!("../../data/wordlist-pt.txt"),
+        focus_patterns: &[],
+        upper_overrides: &[],
+        lower_overrides: &[],
+    },
+    LanguageSpec {
+        code: "ro",
+        display_name: "Română",
+        aliases: &["romanian", "română"],
+        model: include_bytes!("../../data/model-ro.data"),
+        wordlist: include_str!("../../data/wordlist-ro.txt"),
+        focus_patterns: &[],
+        upper_overrides: &[],
+        lower_overrides: &[],
+    },
+    LanguageSpec {
+        code: "ru",
+        display_name: "Русский",
+        aliases: &["russian", "русский"],
+        model: include_bytes!("../../data/model-ru.data"),
+        wordlist: include_str!("../../data/wordlist-ru.txt"),
+        focus_patterns: &[],
+        upper_overrides: &[],
+        lower_overrides: &[],
+    },
+    LanguageSpec {
+        code: "sl",
+        display_name: "Slovenščina",
+        aliases: &["slovenian", "slovenščina"],
+        model: include_bytes!("../../data/model-sl.data"),
+        wordlist: include_str!("../../data/wordlist-sl.txt"),
+        focus_patterns: &[],
+        upper_overrides: &[],
+        lower_overrides: &[],
+    },
+    LanguageSpec {
+        code: "sv",
+        display_name: "Svenska",
+        aliases: &["swedish", "svenska"],
+        model: include_bytes!("../../data/model-sv.data"),
+        wordlist: include_str!("../../data/wordlist-sv.txt"),
+        focus_patterns: &[],
+        upper_overrides: &[],
+        lower_overrides: &[],
+    },
+    LanguageSpec {
         code: "tr",
         display_name: "Türkçe",
         aliases: &["turkish", "türkçe"],
@@ -71,14 +354,13 @@ static SPECS: [LanguageSpec; Language::ALL.len()] = [
         lower_overrides: &[('I', 'ı'), ('İ', 'i')],
     },
     LanguageSpec {
-        code: "de",
-        display_name: "Deutsch",
-        aliases: &["german", "deutsch"],
-        model: include_bytes!("../../data/model-de.data"),
-        wordlist: include_str!("../../data/wordlist-de.txt"),
+        code: "uk",
+        display_name: "Українська",
+        aliases: &["ukrainian", "українська"],
+        model: include_bytes!("../../data/model-uk.data"),
+        wordlist: include_str!("../../data/wordlist-uk.txt"),
         focus_patterns: &[],
-        // keybr.com shows the capital Eszett; Rust would give "SS".
-        upper_overrides: &[('ß', "ẞ")],
+        upper_overrides: &[],
         lower_overrides: &[],
     },
 ];
@@ -100,8 +382,37 @@ const _: () = {
 };
 
 impl Language {
-    /// Every supported language, in the order the UI lists them.
-    pub const ALL: &'static [Language] = &[Language::English, Language::Turkish, Language::German];
+    /// Every supported language, in the order the UI lists them: both
+    /// Englishes, then the rest by code.
+    pub const ALL: &'static [Language] = &[
+        Language::English,
+        Language::EnglishUk,
+        Language::Belarusian,
+        Language::Czech,
+        Language::Danish,
+        Language::German,
+        Language::Greek,
+        Language::Spanish,
+        Language::Estonian,
+        Language::Finnish,
+        Language::French,
+        Language::Croatian,
+        Language::Hungarian,
+        Language::Armenian,
+        Language::Italian,
+        Language::Lithuanian,
+        Language::Latvian,
+        Language::NorwegianBokmal,
+        Language::Dutch,
+        Language::Polish,
+        Language::Portuguese,
+        Language::Romanian,
+        Language::Russian,
+        Language::Slovenian,
+        Language::Swedish,
+        Language::Turkish,
+        Language::Ukrainian,
+    ];
 
     fn spec(self) -> &'static LanguageSpec {
         &SPECS[self as usize]
@@ -114,8 +425,8 @@ impl Language {
         })
     }
 
-    /// Every supported code, comma-separated (`"en, tr, de"`), for help
-    /// and error text.
+    /// Every supported code, comma-separated in `ALL` order
+    /// (`"en, en-gb, be, ..."`), for help and error text.
     pub fn supported_codes() -> String {
         Language::ALL
             .iter()
@@ -124,12 +435,13 @@ impl Language {
             .join(", ")
     }
 
-    /// ISO 639-1 code: the config value and keybr.com's language id.
+    /// The config value: keybr.com's language id, lowercase (`en-gb` is
+    /// its `en-GB`).
     pub fn code(self) -> &'static str {
         self.spec().code
     }
 
-    /// Parse a language code (`"en"`, `"tr"`) or name. Case-insensitive,
+    /// Parse a language code (`"en"`, `"en-gb"`) or name. Case-insensitive,
     /// since it comes from a hand-edited config file or the command line.
     pub fn from_code(code: &str) -> Option<Self> {
         let code = code.trim().to_lowercase();
@@ -196,7 +508,8 @@ impl Language {
 
     /// Uppercase form of a letter for display. The language's own rules
     /// come first (Turkish `i` is `İ`, German `ß` is `ẞ`), then Rust's
-    /// locale-free uppercase.
+    /// locale-free uppercase. One character, except Armenian `և`, whose
+    /// form is the two letters `ԵՎ`.
     pub fn upper(self, c: char) -> String {
         match self
             .spec()
@@ -214,7 +527,9 @@ impl Language {
         s.chars().map(|c| self.upper(c)).collect()
     }
 
-    /// Lowercase form of a letter typed or hand-edited in uppercase.
+    /// Lowercase form of a letter typed or hand-edited in uppercase. A pin
+    /// is one character, so Armenian `և` (shown as `ԵՎ`) is pinned as `և`
+    /// itself, and a lone `Ե` is the letter `ե`.
     pub fn lower(self, c: char) -> char {
         match self
             .spec()
@@ -243,6 +558,7 @@ mod tests {
     use crate::engine::filter::LetterFilter;
     use crate::engine::transition::TransitionTable;
     use crate::engine::WordGenerator;
+    use ratatui::text::Span;
     use std::collections::{HashMap, HashSet};
 
     /// The alphabets and unlock orders this crate shipped as hand-copied
@@ -255,6 +571,56 @@ mod tests {
     /// over `model-de.data`.
     const DE_LETTERS: &str = "aäbcdefghijklmnoöpqrstuüvwxyzß";
     const DE_UNLOCK_ORDER: &str = "entirlhascgumofdkbpzüäßwövyqxj";
+    /// keybr.com's alphabets for the rest, and the unlock orders derived
+    /// from their models outside this crate the same way.
+    const EN_GB_LETTERS: &str = "abcdefghijklmnopqrstuvwxyz";
+    const EN_GB_UNLOCK_ORDER: &str = "eitnarsloudychmgpkbfvwzxqj";
+    const BE_LETTERS: &str = "абвгдежзійклмнопрстуўфхцчшыьэюя";
+    const BE_UNLOCK_ORDER: &str = "аыінеуолцкрятмўсьвдчзюйгхэшбпжф";
+    const CS_LETTERS: &str = "aábcčdďeéěfghiíjklmnňoóprřsštťuúůvxyýzž";
+    const CS_UNLOCK_ORDER: &str = "ealiotnukímvhdcěrysájzéýžčřšbpůťňfgďxúó";
+    const DA_LETTERS: &str = "abcdefghijklmnopqrstuvwxyzæøå";
+    const DA_UNLOCK_ORDER: &str = "ertnilasdgkomuævpbøyfjåchzwxq";
+    const EL_LETTERS: &str = "αάβγδεέζηήθιίκλμνξοόπρσςτυύφχψωώ";
+    const EL_UNLOCK_ORDER: &str = "εαοιτνσρςημλίάκυόωέήπγύθδχώφζβξψ";
+    const ES_LETTERS: &str = "aábcdeéfghiíjlmnñoópqrstuúvxyz";
+    const ES_UNLOCK_ORDER: &str = "aeoirnstulcdmgbópívájhéfzqyñúx";
+    const ET_LETTERS: &str = "abdefghijklmnoprstuvõäöüš";
+    const ET_UNLOCK_ORDER: &str = "aeisumtlnokrdgäpvhöübjõfš";
+    const FI_LETTERS: &str = "abdefghijklmnoprstuvyäö";
+    const FI_UNLOCK_ORDER: &str = "aintsäelkuomyrpjvdhögfb";
+    const FR_LETTERS: &str = "abcçdeéèfghijlmnopqrstuvxyz";
+    const FR_UNLOCK_ORDER: &str = "eirnutsaloémcdgphèbfvqxzyjç";
+    const HR_LETTERS: &str = "abcćčdđefghijklmnoprsštuvzž";
+    const HR_UNLOCK_ORDER: &str = "aietonrjlkusdvmczćčgbpšžhfđ";
+    const HU_LETTERS: &str = "aábcdeéfghiíjklmnoóöőpqrstuúüűvwxyz";
+    const HU_UNLOCK_ORDER: &str = "eatnlskiroázégbymdóuvcöpőjhíüúfűxwq";
+    const HY_LETTERS: &str = "աբգդեզէըթժիլխծկհձղճմյնշոչպջռսվտրցւփքևօֆ";
+    const HY_UNLOCK_ORDER: &str = "աոնեիրւլտկվյմսցըդքղթծգբհպռխզչշջևճփժձֆէօ";
+    const IT_LETTERS: &str = "abcdefghijklmnopqrstuvwxyz";
+    const IT_UNLOCK_ORDER: &str = "ieoatrnlcsumgzdbpvfhqkwyxj";
+    const LT_LETTERS: &str = "aąbcčdeęėfghiįyjklmnoprsštuųūvzž";
+    const LT_UNLOCK_ORDER: &str = "iasoetunkrlėjmdąųgyvbšpįžčęūczhf";
+    const LV_LETTERS: &str = "aābcčdeēfgģhiījkķlļmnņoprsštuūvzž";
+    const LV_UNLOCK_ORDER: &str = "iasternlmouādkēījgzbcpvšņūķļģfžhč";
+    const NB_LETTERS: &str = "abcdefghijklmnoprstuvwyæøå";
+    const NB_UNLOCK_ORDER: &str = "ertnilaskodgmpuvøyjfbåæhwc";
+    const NL_LETTERS: &str = "abcdefghijklmnopqrstuvwxyz";
+    const NL_UNLOCK_ORDER: &str = "eaintorlsudkgmhcjpfbwvzyqx";
+    const PL_LETTERS: &str = "aąbcćdeęfghijklłmnńoóprsśtuwyzźż";
+    const PL_UNLOCK_ORDER: &str = "ieaoznywrctkudmjęslłćąhbóśgżpfńź";
+    const PT_LETTERS: &str = "aáâãàbcçdeéêfghiíjlmnoóôõpqrstuúvxz";
+    const PT_UNLOCK_ORDER: &str = "aoiersntudclmgãvhbpçfízéxõáqóêjâúôà";
+    const RO_LETTERS: &str = "aăâbcdefghiîjlmnoprsștțuvxz";
+    const RO_UNLOCK_ORDER: &str = "ieatrnulăocsmdpzbgvâțfhjșxî";
+    const RU_LETTERS: &str = "абвгдежзийклмнопрстуфхцчшщъыьэюя";
+    const RU_UNLOCK_ORDER: &str = "атиоенркслйвьыдумячзжгбпцшщхюфэъ";
+    const SL_LETTERS: &str = "abcčdefghijklmnoprsštuvzž";
+    const SL_UNLOCK_ORDER: &str = "aeitonrkjslvdčmbucgpzšžhf";
+    const SV_LETTERS: &str = "abcdefghijklmnoprstuvwxyåäö";
+    const SV_UNLOCK_ORDER: &str = "atrenilsdgkomäupöåvcfyjhbxw";
+    const UK_LETTERS: &str = "абвгґдеєжзиіїйклмнопрстуфхцчшщьюя";
+    const UK_UNLOCK_ORDER: &str = "иаоінвтуелркмяьдсчюгйхзцпшбжїєґщф";
 
     fn chars(s: &str) -> Vec<char> {
         s.chars().collect()
@@ -280,12 +646,38 @@ mod tests {
     }
 
     #[test]
-    fn derived_letters_and_unlock_order_match_the_old_constants() {
+    fn derived_letters_and_unlock_order_match_the_pinned_constants() {
         let expected = [
             (Language::English, EN_LETTERS, EN_UNLOCK_ORDER),
-            (Language::Turkish, TR_LETTERS, TR_UNLOCK_ORDER),
+            (Language::EnglishUk, EN_GB_LETTERS, EN_GB_UNLOCK_ORDER),
+            (Language::Belarusian, BE_LETTERS, BE_UNLOCK_ORDER),
+            (Language::Czech, CS_LETTERS, CS_UNLOCK_ORDER),
+            (Language::Danish, DA_LETTERS, DA_UNLOCK_ORDER),
             (Language::German, DE_LETTERS, DE_UNLOCK_ORDER),
+            (Language::Greek, EL_LETTERS, EL_UNLOCK_ORDER),
+            (Language::Spanish, ES_LETTERS, ES_UNLOCK_ORDER),
+            (Language::Estonian, ET_LETTERS, ET_UNLOCK_ORDER),
+            (Language::Finnish, FI_LETTERS, FI_UNLOCK_ORDER),
+            (Language::French, FR_LETTERS, FR_UNLOCK_ORDER),
+            (Language::Croatian, HR_LETTERS, HR_UNLOCK_ORDER),
+            (Language::Hungarian, HU_LETTERS, HU_UNLOCK_ORDER),
+            (Language::Armenian, HY_LETTERS, HY_UNLOCK_ORDER),
+            (Language::Italian, IT_LETTERS, IT_UNLOCK_ORDER),
+            (Language::Lithuanian, LT_LETTERS, LT_UNLOCK_ORDER),
+            (Language::Latvian, LV_LETTERS, LV_UNLOCK_ORDER),
+            (Language::NorwegianBokmal, NB_LETTERS, NB_UNLOCK_ORDER),
+            (Language::Dutch, NL_LETTERS, NL_UNLOCK_ORDER),
+            (Language::Polish, PL_LETTERS, PL_UNLOCK_ORDER),
+            (Language::Portuguese, PT_LETTERS, PT_UNLOCK_ORDER),
+            (Language::Romanian, RO_LETTERS, RO_UNLOCK_ORDER),
+            (Language::Russian, RU_LETTERS, RU_UNLOCK_ORDER),
+            (Language::Slovenian, SL_LETTERS, SL_UNLOCK_ORDER),
+            (Language::Swedish, SV_LETTERS, SV_UNLOCK_ORDER),
+            (Language::Turkish, TR_LETTERS, TR_UNLOCK_ORDER),
+            (Language::Ukrainian, UK_LETTERS, UK_UNLOCK_ORDER),
         ];
+        let pinned: Vec<Language> = expected.iter().map(|&(lang, _, _)| lang).collect();
+        assert_eq!(pinned, Language::ALL, "every language pins its letters");
         for (lang, letters, order) in expected {
             assert_eq!(lang.letters(), chars(letters).as_slice(), "{}", lang.code());
             assert_eq!(
@@ -329,8 +721,44 @@ mod tests {
         assert_eq!(Language::from_code("de"), Some(Language::German));
         assert_eq!(Language::from_code(" Deutsch "), Some(Language::German));
         assert_eq!(Language::from_code("GERMAN"), Some(Language::German));
+        assert_eq!(Language::from_code("EN-GB"), Some(Language::EnglishUk));
+        assert_eq!(Language::from_code("en_GB"), Some(Language::EnglishUk));
+        assert_eq!(Language::from_code("British"), Some(Language::EnglishUk));
+        assert_eq!(Language::from_code("ΕΛΛΗΝΙΚΆ"), Some(Language::Greek));
+        assert_eq!(Language::from_code("Русский"), Some(Language::Russian));
+        assert_eq!(
+            Language::from_code("bokmal"),
+            Some(Language::NorwegianBokmal)
+        );
+        assert_eq!(
+            Language::from_code("Norwegian"),
+            Some(Language::NorwegianBokmal)
+        );
+        assert_eq!(Language::from_code("uk"), Some(Language::Ukrainian));
         assert_eq!(Language::from_code("xx"), None);
-        assert_eq!(Language::supported_codes(), "en, tr, de");
+        assert_eq!(
+            Language::supported_codes(),
+            "en, en-gb, be, cs, da, de, el, es, et, fi, fr, hr, hu, hy, it, lt, lv, nb, nl, pl, pt, \
+             ro, ru, sl, sv, tr, uk"
+        );
+    }
+
+    /// `from_code` takes the first match, so a name two languages shared
+    /// would quietly pick one of them.
+    #[test]
+    fn every_code_and_alias_names_one_language() {
+        let mut owners: HashMap<&str, Language> = HashMap::new();
+        for &lang in Language::ALL {
+            let spec = lang.spec();
+            for &name in std::iter::once(&spec.code).chain(spec.aliases) {
+                assert_eq!(name, name.trim().to_lowercase(), "{name:?}");
+                if let Some(other) = owners.insert(name, lang) {
+                    panic!("{name:?} names {other:?} and {lang:?}");
+                }
+            }
+            // The native name is always accepted.
+            assert_eq!(Language::from_code(lang.display_name()), Some(lang));
+        }
     }
 
     #[test]
@@ -356,22 +784,66 @@ mod tests {
     }
 
     #[test]
-    fn every_letter_uppercases_to_one_char() {
+    fn greek_keeps_its_accented_capitals_apart() {
+        let el = Language::Greek;
+        assert_eq!(el.upper('α'), "Α");
+        assert_eq!(el.upper('ά'), "Ά");
+        assert_eq!(el.upper('ή'), "Ή");
+        assert_eq!(el.upper('ώ'), "Ώ");
+        assert_eq!(el.upper('σ'), "Σ");
+        assert_eq!(el.upper('ς'), "ς");
+        assert_eq!(el.lower('Σ'), 'σ');
+        assert_eq!(el.lower('ς'), 'ς');
+        assert_eq!(el.lower('Ύ'), 'ύ');
+    }
+
+    #[test]
+    fn armenian_ech_yiwn_shows_as_two_capitals() {
+        let hy = Language::Armenian;
+        assert_eq!(hy.upper('և'), "ԵՎ");
+        assert_eq!(hy.upper('ե'), "Ե");
+        assert_eq!(hy.upper('վ'), "Վ");
+        assert_eq!(hy.upper_str("ևս"), "ԵՎՍ");
+        // A pin stays one character: `և` itself, and `Ե` is `ե`.
+        assert_eq!(hy.lower('և'), 'և');
+        assert_eq!(hy.lower('Ե'), 'ե');
+    }
+
+    /// Every heatmap tile has a label of its own: one character a cell
+    /// wide (two for Armenian `և`, `ԵՎ`), and no two letters of a language
+    /// share one. That last part is why Greek keeps Rust's accented
+    /// capitals rather than keybr.com's. A single-character label typed
+    /// back as a pin lowercases to its letter.
+    #[test]
+    fn every_letter_has_a_tile_label_of_its_own() {
         for &lang in Language::ALL {
+            let mut shown: HashMap<String, char> = HashMap::new();
             for &c in lang.letters() {
                 let upper = lang.upper(c);
+                let n = upper.chars().count();
+                let expected = if (lang, c) == (Language::Armenian, 'և') {
+                    2
+                } else {
+                    1
+                };
+                assert_eq!(n, expected, "{} '{c}' shows as {upper:?}", lang.code());
                 assert_eq!(
-                    upper.chars().count(),
-                    1,
-                    "{} '{c}' uppercases to {upper:?}",
+                    Span::raw(upper.clone()).width(),
+                    n,
+                    "{} '{c}' shows as {upper:?}",
                     lang.code()
                 );
-                assert_eq!(
-                    lang.lower(upper.chars().next().unwrap()),
-                    c,
-                    "{}",
-                    lang.code()
-                );
+                if let Some(other) = shown.insert(upper.clone(), c) {
+                    panic!("{} '{other}' and '{c}' both show as {upper:?}", lang.code());
+                }
+                if n == 1 {
+                    assert_eq!(
+                        lang.lower(upper.chars().next().unwrap()),
+                        c,
+                        "{}",
+                        lang.code()
+                    );
+                }
             }
         }
     }
@@ -390,7 +862,14 @@ mod tests {
                 assert!((2..=12).contains(&n), "{} word {word:?}", lang.code());
                 count += 1;
             }
-            assert!(count >= 5000, "{} has only {count} words", lang.code());
+            // keybr.com's lists hold 5,000 to 10,000 words, except
+            // Slovenian's, which has 2,765.
+            let floor = if lang == Language::Slovenian {
+                2500
+            } else {
+                5000
+            };
+            assert!(count >= floor, "{} has only {count} words", lang.code());
         }
     }
 
@@ -409,6 +888,35 @@ mod tests {
             for word in text.split_whitespace() {
                 assert!(word.contains('ä'), "focus 'ä' missing from '{word}'");
                 assert!(word.chars().all(|c| de.is_letter(c)), "'{word}'");
+            }
+        }
+    }
+
+    /// Every language makes a lesson out of its six starter letters and
+    /// out of its whole alphabet: focused on the rarest letter in play,
+    /// with and without the real-word blend, and phonetic with no focus.
+    #[test]
+    fn every_language_generates_lessons_from_its_own_letters() {
+        for &lang in Language::ALL {
+            let mut gen = WordGenerator::with_seed_for(5, lang);
+            let starters = &lang.unlock_order()[..6];
+            for letters in [starters, lang.unlock_order()] {
+                let rarest = Some(FocusRule::Key(*letters.last().unwrap()));
+                for (focus, natural) in [(rarest, true), (rarest, false), (None, false)] {
+                    gen.set_natural_words(natural);
+                    let text = gen.generate_fragment(&LetterFilter::new(letters, focus), 60);
+                    let n = letters.len();
+                    assert!(
+                        text.chars().count() >= 60,
+                        "{} with {n} letters: {text:?}",
+                        lang.code()
+                    );
+                    assert!(
+                        text.chars().all(|c| c == ' ' || letters.contains(&c)),
+                        "{} with {n} letters: {text:?}",
+                        lang.code()
+                    );
+                }
             }
         }
     }
@@ -469,5 +977,7 @@ mod tests {
         assert_eq!(Language::English.stats_file_name(), "stats.json");
         assert_eq!(Language::Turkish.stats_file_name(), "stats-tr.json");
         assert_eq!(Language::German.stats_file_name(), "stats-de.json");
+        assert_eq!(Language::EnglishUk.stats_file_name(), "stats-en-gb.json");
+        assert_eq!(Language::Armenian.stats_file_name(), "stats-hy.json");
     }
 }
