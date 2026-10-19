@@ -109,13 +109,15 @@ The importer replays the sessions of your practice language and layout family (s
 A few details worth knowing:
 
 - Your target speed is not part of the export. If you use a non-default target on keybr.com, pass `--target-wpm <N>` alongside `--import`, since the unlocked set is derived against it. With no flag, the target saved in your config is used.
-- Only sessions in the practice language are imported: `keybr-tui --language tr --import typing-data.json` takes the Turkish (`tr-tr-*`) sessions, a plain `--import` the English ones.
+- Only sessions in the practice language are imported: `keybr-tui --language tr --import typing-data.json` takes the Turkish (`tr-tr-*`) sessions, a plain `--import` those of your saved practice language (English by default).
 - keybr.com keeps separate key stats for each layout family, a group of layouts it treats as one (US and UK QWERTY are both `qwerty`, while `dvorak`, `colemak` and `colemak-dh` are each their own), so the importer takes one family: by default, the family of your most recent session in the practice language. Pick another with `--layout colemak` (a family) or `--layout en-colemak` (a layout id as stored in the export, standing for its family), or merge every family into one set of key stats with `--layout all`. The report names the family it imported and counts the sessions it skipped. Turkish Q (family `qwerty`) and Turkish F (family `tr-tr-f`) are separate families, so a mixed Turkish export imports only the latest of the two unless you pass `--layout all`.
 - Existing local stats are never overwritten unless you pass `--force`, which still writes a `.bak` backup of that language's stats file first.
 
 ## Languages
 
 English, Turkish and German are supported. Each uses keybr.com's own data for that language: its phonetic model, its word list, and its letter order (Turkish starts from `a e i n ı r`, German from `e n t i r l`). The heatmap shows the language's whole alphabet, with Turkish dotted and dotless i as separate keys (`İ` and `I`) and German `ß` shown as `ẞ`. keybr.com leaves `ß` out of its lessons on the Swiss German layout (`de-ch` has no ß key), while keybr-tui always teaches all 30 German letters.
+
+Switch languages in Settings: the last row, Language, cycles English, Türkçe and Deutsch with `Left`/`Right`. The switch is immediate and works like relaunching with `--language`: your current stats are saved, the chosen language's own stats load (its unlocked letters, key speeds and history), the next lesson is in that language, and the config remembers the choice. Or pick it at launch:
 
 ```bash
 keybr-tui --language tr   # switch to Turkish; later runs remember it
@@ -148,7 +150,7 @@ fragment_length = 100
 | `alphabet_size` | `0.0` | Fraction of the non-starter alphabet to force-unlock regardless of confidence (keybr's `alphabetSize`), clamped to the range 0.0 to 1.0 |
 | `focus_letter` | `unset` | Pins one unlocked letter, given as a single lowercase letter of the practice alphabet, so every generated word contains it; omit the key (or cycle the Settings "Focus letter" row to Auto) for the automatic weakest-key focus |
 | `focus_pattern` | `unset` | Pins one combination drill: a bigram (`"cr"`, `"pl"`, `"br"`, `"tr"`, `"gr"`, `"fr"`, `"bl"`, `"cl"`) or a word ending (`"-ing"`, `"-ed"`, `"-er"`, `"-ly"`, `"-tion"`, `"-ment"`, `"-able"`, `"-ous"`), so every generated word matches it instead of just containing one letter; only takes effect while the pattern is on offer, meaning its letters are unlocked and the dictionary has at least 8 distinct words for it, and setting it clears `focus_letter` since the two share one focus slot |
-| `language` | `"en"` | Practice language: `"en"`, `"tr"` or `"de"`; `--language` sets it too |
+| `language` | `"en"` | Practice language: `"en"`, `"tr"` or `"de"`; `--language` and the Settings "Language" row set it too |
 
 </details>
 
