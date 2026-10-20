@@ -32,8 +32,8 @@ pub enum FocusRule {
 ///
 /// It does not keep `generate_fragment`'s duplicate-rejection loop off
 /// its retry path, and nothing does: a pool this small runs dry inside a
-/// long fragment, and even the thousands-of-words unfocused draw reaches
-/// the retry bound at the default fragment length. That is why the
+/// long fragment, and even a fresh profile's unfocused natural-words draw
+/// reaches the retry bound at the default fragment length. That is why the
 /// generator stops rejecting duplicates once a pattern draw has hit the
 /// bound, rather than relying on a pool size that never hits it.
 pub const MIN_DRILL_WORDS: usize = 8;

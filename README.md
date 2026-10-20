@@ -159,7 +159,7 @@ fragment_length = 100
 | `target_wpm` | `35` | Target speed in words per minute; drives the confidence threshold |
 | `error_mode` | `"forgive-mistakes"` | `"forgive-mistakes"` advances past typos, `"stop-on-error"` blocks until you correct them |
 | `fragment_length` | `100` | Characters of practice text generated per lesson |
-| `natural_words` | `true` | Prefer real words of the practice language, falling back to the phonetic model when none fit your active letters |
+| `natural_words` | `true` | Draw lessons from real words of the practice language that fit your active letters, with phonetic words filling in when fewer than 15 fit, as on keybr.com |
 | `daily_goal_minutes` | `30` | Daily practice goal in minutes; `0` hides the daily-goal indicator |
 | `alphabet_size` | `0.0` | Fraction of the non-starter alphabet to force-unlock regardless of confidence (keybr's `alphabetSize`), clamped to the range 0.0 to 1.0 |
 | `focus_letter` | `unset` | Pins one unlocked letter, given as a single lowercase letter of the practice alphabet, so every generated word contains it; omit the key (or cycle the Settings "Focus letter" row to Auto) for the automatic weakest-key focus |

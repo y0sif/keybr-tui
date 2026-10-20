@@ -87,10 +87,10 @@ Its unlock order, read from it as above, is
 ## `wordlist-en.txt`
 
 A list of real English words used by the natural-words blend in
-`src/engine/dictionary.rs`. When the focused letter and active letter
-filter permit, the generator returns one of these words instead of a
-phonetic Markov sample, producing immediately recognisable practice
-text.
+`src/engine/dictionary.rs`. A lesson draws from the first 1,000 of these
+words (three letters or more) that fit the active letters and the focused
+letter, producing immediately recognisable practice text. When fewer than
+15 fit, phonetic Markov samples fill in, as on keybr.com.
 
 ### Source
 
@@ -226,6 +226,13 @@ No upstream list has capitalised words, other characters or duplicates,
 and none is in decomposed (NFD) Unicode, so every drop is for length:
 words longer than 12 characters, and single letters. Slovenian's upstream
 list is short, 2,765 words.
+
+keybr.com keeps the words over 12 characters, so once most letters are
+unlocked a lesson's pool of 1,000 words can differ from keybr.com's: by
+up to 45 words with no focus (Armenian; 14 for Russian, none for English),
+and by more when the focused letter is common in long words (over a
+hundred for Russian `ч` and Ukrainian `ґ`, about half the pool for
+Armenian `թ`).
 
 ### Letter casing
 

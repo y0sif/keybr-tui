@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use super::dictionary::Dictionary;
 use super::filter::{FocusRule, LetterFilter};
 use super::language::Language;
@@ -53,8 +55,10 @@ pub struct WordGenerator {
     rng: SimpleRng,
     table: TransitionTable,
     dictionary: Dictionary,
-    /// When true, prefer real dictionary words and fall back to the
-    /// phonetic model only when no dictionary word matches the filter.
+    /// When true, a lesson draws from a pool of real dictionary words
+    /// that fit the filter, padded with phonetic words when too few do
+    /// (see `natural_word_pool`). When false, every word is phonetic.
+    /// Combination drills read the dictionary either way.
     natural_words: bool,
 }
 
@@ -65,6 +69,21 @@ const SPACE_BOOST_BASE: f64 = 1.3;
 
 /// History length is `order - 1`. For the order-4 models this is 3.
 const HISTORY_LEN: usize = 3;
+
+/// The natural-words pool, as keybr.com's `GuidedLesson` builds it: at
+/// most this many dictionary words, the most common that fit the filter
+/// (its `.slice(0, 1000)`).
+const POOL_MAX_WORDS: usize = 1000;
+/// Phonetic words pad the pool up to this many when fewer real words fit.
+const POOL_MIN_WORDS: usize = 15;
+/// Only dictionary words this long or longer, in characters, are used.
+/// keybr.com drops the shorter ones (`word.length > 2`) when it builds its
+/// dictionary.
+const POOL_MIN_WORD_LEN: usize = 3;
+/// Phonetic draws the padding may spend per word it still has to add. A
+/// draw that dead-ends is skipped, so this bounds the work when the
+/// letters can barely make a word.
+const POOL_PAD_DRAWS_PER_WORD: usize = 4;
 
 impl Default for WordGenerator {
     fn default() -> Self {
@@ -125,50 +144,84 @@ impl WordGenerator {
         &self.dictionary
     }
 
-    /// Generate a single word respecting the letter filter.
+    /// Generate a single word respecting the letter filter, for a fragment
+    /// that has no natural-words pool to draw from (see
+    /// `generate_fragment`).
     ///
-    /// If `natural_words` is enabled, first try to draw a real word from
-    /// the embedded dictionary that satisfies the filter. If
-    /// no such word exists (e.g. the active letter set is too restrictive
-    /// for any real word — typical early in the curriculum), fall back to
-    /// the phonetic order-4 model so the user still has plausible-looking
-    /// practice text.
-    ///
-    /// A pattern focus is the exception on both counts. It reads the
-    /// dictionary even with `natural_words` off, because that toggle is
-    /// about blending real words into ordinary practice and a combination
-    /// drill has nothing to drill without them. And it cannot fall back to
-    /// the Markov model, which plants a single literal character at the
-    /// front of a word and never constrains endings, so when the
-    /// dictionary comes up empty the word is generated unfocused instead.
-    pub fn next_word(&mut self, filter: &LetterFilter) -> String {
-        let pattern_focus = matches!(
-            filter.focused,
-            Some(FocusRule::Contains(_) | FocusRule::Suffix(_))
-        );
+    /// A pattern focus draws a real word from the dictionary, even with
+    /// `natural_words` off, because that toggle is about real words in
+    /// ordinary practice and a combination drill has nothing to drill
+    /// without them. It cannot fall back to the Markov model, which plants
+    /// a single literal character at the front of a word and never
+    /// constrains endings, so when the dictionary comes up empty the word
+    /// is generated unfocused instead. Without a pattern the word is
+    /// phonetic.
+    fn next_word(&mut self, filter: &LetterFilter) -> String {
+        if !is_pattern_focus(filter) {
+            return self.phonetic_next_word(filter);
+        }
 
-        if self.natural_words || pattern_focus {
-            if let Some(word) = self.dictionary.next_word(filter, &mut self.rng) {
-                return word.to_string();
+        if let Some(word) = self.dictionary.next_word(filter, &mut self.rng) {
+            return word.to_string();
+        }
+
+        // Dropping the focus for this word beats the degenerate filler,
+        // which for a pattern would spell "tiontiontion".
+        let unfocused = LetterFilter {
+            allowed: filter.allowed.clone(),
+            focused: None,
+        };
+        self.phonetic_next_word(&unfocused)
+    }
+
+    /// The words a natural-words lesson draws from, built the way
+    /// keybr.com's `GuidedLesson` builds them: the first
+    /// `POOL_MAX_WORDS` dictionary words of at least `POOL_MIN_WORD_LEN`
+    /// characters that fit the filter, most common first, then phonetic
+    /// words up to `POOL_MIN_WORDS`.
+    ///
+    /// The padding is what keeps an early lesson, whose few letters spell
+    /// only a handful of real words, from repeating them. As on keybr.com,
+    /// it may hold the same phonetic word twice. It never holds the
+    /// degenerate filler (the focus key tripled): keybr.com pads with the
+    /// partial word its model is left with after five dead ends, but our
+    /// model retries differently (a known gap), so a draw that dead-ends
+    /// is skipped instead, up to `POOL_PAD_DRAWS_PER_WORD` draws per
+    /// missing word. Only a pool that would otherwise be empty gets the
+    /// filler, where keybr.com pushes `"?"`.
+    fn natural_word_pool(&mut self, filter: &LetterFilter) -> Vec<Cow<'static, str>> {
+        // A `Key` focus outside the language's alphabet is no focus for
+        // the padding either, as for `find`: planted in a phonetic word, a
+        // space focus would split it in two.
+        let filter = &LetterFilter {
+            allowed: filter.allowed.clone(),
+            focused: self.dictionary.enforceable_focus(filter),
+        };
+        let mut pool: Vec<Cow<'static, str>> = self
+            .dictionary
+            .find(filter, POOL_MIN_WORD_LEN, POOL_MAX_WORDS)
+            .into_iter()
+            .map(Cow::Borrowed)
+            .collect();
+        let mut draws = POOL_MIN_WORDS.saturating_sub(pool.len()) * POOL_PAD_DRAWS_PER_WORD;
+        while pool.len() < POOL_MIN_WORDS && draws > 0 {
+            draws -= 1;
+            if let Some(word) = self.try_phonetic_word(filter) {
+                pool.push(Cow::Owned(word));
             }
         }
-
-        if pattern_focus {
-            // Dropping the focus for this word beats the degenerate filler,
-            // which for a pattern would spell "tiontiontion".
-            let unfocused = LetterFilter {
-                allowed: filter.allowed.clone(),
-                focused: None,
-            };
-            return self.phonetic_next_word(&unfocused);
+        if pool.is_empty() {
+            pool.push(Cow::Owned(filler_word(filter)));
         }
-
-        self.phonetic_next_word(filter)
+        pool
     }
 
     /// Generate a single word using only the order-4 phonetic Markov
-    /// model. Used as a fallback when no dictionary word matches the
-    /// filter, and exposed directly for tests.
+    /// model, falling back to the degenerate filler when it cannot. It
+    /// makes every word with `natural_words` off, stands in (unfocused)
+    /// for a drill word the dictionary cannot supply, and is exposed
+    /// directly for tests. The natural-words padding uses
+    /// `try_phonetic_word` instead, which has no filler.
     ///
     /// Algorithm (matching keybr.com):
     /// 1. If there's a focused key, find a 1–3 char prefix containing it.
@@ -180,22 +233,14 @@ impl WordGenerator {
     /// 6. Weighted random select next char, advance history.
     /// 7. Max word length 10, retry up to 5 times on dead-ends.
     pub fn phonetic_next_word(&mut self, filter: &LetterFilter) -> String {
-        for _ in 0..MAX_RETRIES {
-            if let Some(word) = self.try_generate_word(filter) {
-                return word;
-            }
-        }
-        // Fallback: return a single focused key or first allowed key repeated.
-        // Only a `Key` focus has a character worth repeating here; a pattern
-        // reaches this path only when called directly, and repeating it
-        // would spell nonsense.
-        let c = match filter.focused {
-            Some(FocusRule::Key(c)) => c,
-            _ => *filter.allowed.iter().next().unwrap_or(&'e'),
-        };
-        // Note: `repeat_n` requires Rust 1.82+; MSRV here is 1.75.
-        #[allow(clippy::manual_repeat_n)]
-        std::iter::repeat(c).take(MIN_WORD_LEN).collect()
+        self.try_phonetic_word(filter)
+            .unwrap_or_else(|| filler_word(filter))
+    }
+
+    /// A phonetic word in up to `MAX_RETRIES` attempts, or `None` if every
+    /// attempt dead-ends.
+    fn try_phonetic_word(&mut self, filter: &LetterFilter) -> Option<String> {
+        (0..MAX_RETRIES).find_map(|_| self.try_generate_word(filter))
     }
 
     fn try_generate_word(&mut self, filter: &LetterFilter) -> Option<String> {
@@ -389,6 +434,11 @@ impl WordGenerator {
     /// targeting approximately `target_len` characters (counted as
     /// characters, so a Turkish fragment is as long as an English one).
     ///
+    /// With `natural_words` on and no pattern focus, the fragment's words
+    /// come from `natural_word_pool`, built once here, each a uniform pick
+    /// from it as in keybr.com's `randomWords`. Otherwise each word is
+    /// drawn on its own by `next_word`.
+    ///
     /// Duplicate words are rejected and redrawn, giving up after eleven
     /// tries so the loop always makes progress. A combination drill is
     /// offered from
@@ -404,24 +454,24 @@ impl WordGenerator {
     /// profile's six-starter unfocused draw hits it, and so does `-TION`
     /// at nine unlocked letters. So `reject_duplicates = !pattern_focus`
     /// is not a claim that a `Key` focus or no focus never runs out of
-    /// words. It is there to keep those two paths byte-for-byte identical
-    /// to the text they generated before drills existed: they go on
-    /// rejecting duplicates forever, exactly as they always did, and only
-    /// a pattern focus is allowed to give up. Widening the scoping would
+    /// words. It is there so those two paths go on rejecting duplicates
+    /// forever, exactly as they did before drills existed, and only a
+    /// pattern focus is allowed to give up. Widening the scoping would
     /// silently change generated text for every letter-only user.
     pub fn generate_fragment(&mut self, filter: &LetterFilter, target_len: usize) -> String {
         let mut result = String::with_capacity(target_len * 2 + 20);
         let mut result_len = 0usize;
         let mut seen = std::collections::HashSet::new();
         let mut stuck_counter = 0;
-        let pattern_focus = matches!(
-            filter.focused,
-            Some(FocusRule::Contains(_) | FocusRule::Suffix(_))
-        );
+        let pattern_focus = is_pattern_focus(filter);
         let mut reject_duplicates = true;
+        let pool = (self.natural_words && !pattern_focus).then(|| self.natural_word_pool(filter));
 
         while result_len < target_len {
-            let word = self.next_word(filter);
+            let word = match &pool {
+                Some(pool) => pool[self.rng.next_bounded(pool.len() as u32) as usize].to_string(),
+                None => self.next_word(filter),
+            };
 
             // Try to avoid duplicates, but don't loop forever.
             if reject_duplicates && seen.contains(&word) {
@@ -447,6 +497,27 @@ impl WordGenerator {
 
         result
     }
+}
+
+/// The degenerate word for when the phonetic model cannot finish one: the
+/// focused key or first allowed key repeated.
+fn filler_word(filter: &LetterFilter) -> String {
+    // Only a `Key` focus has a character worth repeating here; a pattern
+    // reaches this path only when called directly, and repeating it would
+    // spell nonsense.
+    let c = match filter.focused {
+        Some(FocusRule::Key(c)) => c,
+        _ => *filter.allowed.iter().next().unwrap_or(&'e'),
+    };
+    std::iter::repeat_n(c, MIN_WORD_LEN).collect()
+}
+
+/// True if `filter` drills a combination pattern rather than one letter.
+fn is_pattern_focus(filter: &LetterFilter) -> bool {
+    matches!(
+        filter.focused,
+        Some(FocusRule::Contains(_) | FocusRule::Suffix(_))
+    )
 }
 
 #[cfg(test)]
@@ -586,20 +657,20 @@ mod tests {
     }
 
     #[test]
-    fn dictionary_blend_falls_back_to_phonetic() {
-        // 'q' and 'z' together can't produce any real English word.
-        // With natural-words on (default), the generator must still
-        // return a non-empty word via the phonetic fallback path —
-        // and it must respect the focused-key constraint.
+    fn a_lesson_nothing_fits_still_has_words_to_type() {
+        // 'q' and 'z' together can't produce any real English word, and
+        // the phonetic model cannot finish one either. With natural-words
+        // on (default), the lesson must still be made of non-empty words
+        // that respect the focused-key constraint.
         let keys = vec!['q', 'z'];
         let filter = make_filter_focused(&keys, 'q');
         let mut gen = WordGenerator::with_seed(123);
         assert!(gen.natural_words(), "natural_words should default to on");
 
-        // Generate a handful — the dictionary path will yield None each
-        // time and the phonetic path will produce filler words.
-        for _ in 0..5 {
-            let w = gen.next_word(&filter);
+        // Neither the dictionary nor the padding contributes, so the
+        // whole pool is the degenerate filler.
+        let text = gen.generate_fragment(&filter, 30);
+        for w in text.split(' ') {
             assert!(!w.is_empty(), "generator should never return empty");
             assert!(w.contains('q'), "focused 'q' missing from '{w}'");
             for c in w.chars() {
@@ -615,9 +686,16 @@ mod tests {
         let mut gen = WordGenerator::with_seed(42);
         gen.set_natural_words(false);
         assert!(!gen.natural_words());
-        // With dictionary disabled, this exercises only the phonetic path.
-        let w = gen.next_word(&filter);
-        assert!(!w.is_empty());
+        // With the dictionary disabled, this exercises only the phonetic
+        // path, which spells words the word list does not have. With it
+        // on, every word here would be in the list.
+        let text = gen.generate_fragment(&filter, 200);
+        assert!(!text.is_empty());
+        let words: std::collections::HashSet<&str> = Language::English.wordlist().lines().collect();
+        assert!(
+            text.split_whitespace().any(|w| !words.contains(w)),
+            "every word is a dictionary word: {text:?}"
+        );
     }
 
     #[test]
@@ -798,24 +876,38 @@ mod tests {
 
     #[test]
     fn non_alphabetic_key_focus_still_produces_a_clean_fragment() {
-        // A `Key` focus outside a-z cannot be satisfied by any dictionary
-        // word, and treating it as impossible rather than as unfocused
-        // used to hand back empty words: the fragment came out with
-        // leading and doubled spaces. It must read like ordinary text.
-        let keys: Vec<char> = ('a'..='z').collect();
-        let filter = make_filter_focused(&keys, ' ');
-        let mut gen = WordGenerator::with_seed(4242);
-        let text = gen.generate_fragment(&filter, 100);
-
-        assert!(!text.starts_with(' '), "leading space in: {text:?}");
-        assert!(!text.ends_with(' '), "trailing space in: {text:?}");
-        assert!(!text.contains("  "), "doubled space in: {text:?}");
-        for word in text.split(' ') {
-            assert!(!word.is_empty(), "empty word in: {text:?}");
+        // A `Key` focus outside the alphabet cannot be satisfied by any
+        // dictionary word, and treating it as impossible rather than as
+        // unfocused used to hand back empty words: the fragment came out
+        // with leading and doubled spaces. It must read like ordinary
+        // text. The full English alphabet fills the pool with real words;
+        // the Greek starters fit one, so the rest is phonetic padding,
+        // which must drop the focus too rather than plant a space.
+        let english: Vec<char> = ('a'..='z').collect();
+        let greek = unlocked(Language::Greek, 6);
+        for (lang, keys) in [(Language::English, english), (Language::Greek, greek)] {
+            let filter = make_filter_focused(&keys, ' ');
+            let mut gen = WordGenerator::with_seed_for(4242, lang);
+            let pool = gen.natural_word_pool(&filter);
             assert!(
-                word.chars().all(|c| keys.contains(&c)),
-                "disallowed char in '{word}'"
+                pool.iter().all(|w| !w.is_empty() && !w.contains(' ')),
+                "{}: {pool:?}",
+                lang.code()
             );
+
+            for _ in 0..20 {
+                let text = gen.generate_fragment(&filter, 100);
+                assert!(!text.starts_with(' '), "leading space in: {text:?}");
+                assert!(!text.ends_with(' '), "trailing space in: {text:?}");
+                assert!(!text.contains("  "), "doubled space in: {text:?}");
+                for word in text.split(' ') {
+                    assert!(!word.is_empty(), "empty word in: {text:?}");
+                    assert!(
+                        word.chars().all(|c| keys.contains(&c)),
+                        "disallowed char in '{word}'"
+                    );
+                }
+            }
         }
     }
 
@@ -929,5 +1021,256 @@ mod tests {
                 "'{word}' is not in the Turkish word list"
             );
         }
+    }
+
+    /// The first `n` letters of `language`'s unlock order: the alphabet
+    /// of a profile with `n` letters unlocked.
+    fn unlocked(language: Language, n: usize) -> Vec<char> {
+        language.unlock_order()[..n].to_vec()
+    }
+
+    #[test]
+    fn greek_fresh_profile_lessons_are_not_a_few_words_repeated() {
+        // A fresh Greek profile, 'ε' focused. Its six letters spell four
+        // real words, but three are two letters long, and lessons made of
+        // them alone read "τε εν ντε ει ει εν ντε". keybr.com skips the
+        // short words and pads the one left with phonetic words.
+        let lang = Language::Greek;
+        let keys = unlocked(lang, 6);
+        let filter = make_filter_focused(&keys, 'ε');
+        let gen = WordGenerator::with_seed_for(1, lang);
+        assert_eq!(
+            gen.dictionary()
+                .find(&filter, POOL_MIN_WORD_LEN, POOL_MAX_WORDS),
+            ["ντε"]
+        );
+
+        for seed in [1u32, 42, 7777] {
+            let mut gen = WordGenerator::with_seed_for(seed, lang);
+            let text = gen.generate_fragment(&filter, 100);
+            let words: Vec<&str> = text.split_whitespace().collect();
+            let distinct: std::collections::HashSet<&&str> = words.iter().collect();
+            assert!(distinct.len() > 4, "seed {seed}: {text:?}");
+            for w in &words {
+                assert!(w.contains('ε'), "seed {seed}: focus missing from '{w}'");
+                assert!(
+                    w.chars().all(|c| keys.contains(&c)),
+                    "seed {seed}: disallowed char in '{w}'"
+                );
+                assert!(w.chars().count() >= 3, "seed {seed}: short word '{w}'");
+            }
+        }
+    }
+
+    #[test]
+    fn turkish_lessons_at_eight_letters_are_not_ulu_repeated() {
+        // With 'u' focused at eight letters, "ulu" is the only real word
+        // that fits, and every lesson used to be "ulu ulu ulu". The
+        // phonetic words padding it are what this checks for, not how
+        // varied they are: at these letters the model mostly spells "unu".
+        let lang = Language::Turkish;
+        let keys = unlocked(lang, 8);
+        let filter = make_filter_focused(&keys, 'u');
+        let gen = WordGenerator::with_seed_for(1, lang);
+        assert_eq!(gen.dictionary().find(&filter, 0, usize::MAX), ["ulu"]);
+
+        for seed in [1u32, 42, 7777] {
+            let mut gen = WordGenerator::with_seed_for(seed, lang);
+            let text = gen.generate_fragment(&filter, 100);
+            let words: Vec<&str> = text.split_whitespace().collect();
+            assert!(words.iter().any(|w| *w != "ulu"), "seed {seed}: {text:?}");
+            for w in &words {
+                assert!(w.contains('u'), "seed {seed}: focus missing from '{w}'");
+                assert!(
+                    w.chars().all(|c| keys.contains(&c)),
+                    "seed {seed}: disallowed char in '{w}'"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_lesson_draws_every_word_from_one_pool() {
+        // keybr.com builds the pool once per lesson and picks from it.
+        // Fourteen of the fifteen words here are phonetic, so a pool
+        // rebuilt for each word would let in words from outside it. The
+        // fragment builds its pool before it draws anything, so the same
+        // seed builds the same pool.
+        let lang = Language::Turkish;
+        let filter = make_filter_focused(&unlocked(lang, 8), 'u');
+        for seed in [1u32, 42, 7777] {
+            let pool = WordGenerator::with_seed_for(seed, lang).natural_word_pool(&filter);
+            assert_eq!(pool.len(), POOL_MIN_WORDS, "seed {seed}: {pool:?}");
+            let mut gen = WordGenerator::with_seed_for(seed, lang);
+            let text = gen.generate_fragment(&filter, 500);
+            for w in text.split_whitespace() {
+                assert!(
+                    pool.iter().any(|p| p == w),
+                    "seed {seed}: '{w}' is not in the lesson's pool {pool:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn lessons_pick_uniformly_from_the_pool() {
+        // keybr.com's `randomSample`: every word of the pool is equally
+        // likely, the least common of the thousand as much as the most
+        // common. Each half of the pool should take half the picks; a
+        // biased pick would starve the second half.
+        let keys = Language::English.letters().to_vec();
+        let filter = make_filter(&keys);
+        let mut gen = WordGenerator::with_seed(42);
+        let pool = gen
+            .dictionary()
+            .find(&filter, POOL_MIN_WORD_LEN, POOL_MAX_WORDS);
+        assert_eq!(pool.len(), POOL_MAX_WORDS);
+        let rank: std::collections::HashMap<&str, usize> =
+            pool.iter().enumerate().map(|(i, w)| (*w, i)).collect();
+
+        let mut halves = [0usize; 2];
+        for _ in 0..40 {
+            let text = gen.generate_fragment(&filter, 500);
+            for w in text.split_whitespace() {
+                halves[rank[w] * 2 / pool.len()] += 1;
+            }
+        }
+        let total = halves[0] + halves[1];
+        // Over some three thousand picks, 45 to 55 percent is more than
+        // five standard deviations either side of a fair half.
+        assert!(
+            (45..=55).contains(&(halves[1] * 100 / total)),
+            "second half of the pool got {} of {total} picks",
+            halves[1]
+        );
+    }
+
+    #[test]
+    fn lessons_skip_two_letter_words() {
+        // These nine letters spell eleven two-letter words ("to", "it",
+        // "is", "at" and more). The word list keeps them for combination
+        // drills, but keybr.com never puts one in a lesson.
+        let keys = unlocked(Language::English, 9);
+        for focus in [None, Some(FocusRule::Key('s')), Some(FocusRule::Key('t'))] {
+            let filter = LetterFilter::new(&keys, focus);
+            let mut gen = WordGenerator::with_seed(42);
+            let short: Vec<&str> = gen
+                .dictionary()
+                .find(&filter, 0, usize::MAX)
+                .into_iter()
+                .filter(|w| w.chars().count() < 3)
+                .collect();
+            assert!(!short.is_empty(), "{focus:?}: no two-letter word fits");
+
+            let pool = gen.natural_word_pool(&filter);
+            assert!(
+                pool.iter().all(|w| w.chars().count() >= 3),
+                "{focus:?}: short word in the pool {pool:?}"
+            );
+            for _ in 0..5 {
+                let text = gen.generate_fragment(&filter, 200);
+                for w in text.split_whitespace() {
+                    assert!(w.chars().count() >= 3, "{focus:?}: '{w}' in {text:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fifteen_real_words_need_no_padding() {
+        // With fifteen or more real words that fit, keybr.com adds no
+        // phonetic words: the pool is the real words alone, and every word
+        // of the lesson is real. A fresh English profile ('e' focused) has
+        // 22; 'l' focused on the same letters has exactly fifteen, the
+        // edge of the rule.
+        let keys = unlocked(Language::English, 6);
+        let words: std::collections::HashSet<&str> = Language::English.wordlist().lines().collect();
+        for (focus, fit) in [('e', 22), ('l', POOL_MIN_WORDS)] {
+            let filter = make_filter_focused(&keys, focus);
+            let mut gen = WordGenerator::with_seed(42);
+            let real = gen
+                .dictionary()
+                .find(&filter, POOL_MIN_WORD_LEN, POOL_MAX_WORDS);
+            assert_eq!(real.len(), fit, "'{focus}': {real:?}");
+            assert_eq!(gen.natural_word_pool(&filter), real, "'{focus}'");
+
+            for seed in [1u32, 42, 7777] {
+                let mut gen = WordGenerator::with_seed(seed);
+                let text = gen.generate_fragment(&filter, 200);
+                for w in text.split_whitespace() {
+                    assert!(
+                        words.contains(w),
+                        "'{focus}', seed {seed}: '{w}' is not real"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn lessons_draw_from_the_thousand_most_common_words() {
+        // keybr.com's `.slice(0, 1000)`. With every letter unlocked and no
+        // focus, the pool is the first thousand words of three letters or
+        // more in the word list, which is most common first. Two-letter
+        // words are skipped, not counted, so the thousandth is past line
+        // 1,000 of the file.
+        let keys = Language::English.letters().to_vec();
+        let filter = make_filter(&keys);
+        let top: Vec<&str> = Language::English
+            .wordlist()
+            .lines()
+            .filter(|w| w.chars().count() >= 3)
+            .take(1000)
+            .collect();
+        let mut gen = WordGenerator::with_seed(42);
+        assert_eq!(gen.natural_word_pool(&filter), top);
+
+        let top: std::collections::HashSet<&str> = top.into_iter().collect();
+        for _ in 0..10 {
+            let text = gen.generate_fragment(&filter, 500);
+            for w in text.split_whitespace() {
+                assert!(top.contains(w), "'{w}' is not among the 1,000 most common");
+            }
+        }
+    }
+
+    #[test]
+    fn padding_never_uses_the_degenerate_filler() {
+        // When the phonetic model dead-ends, `phonetic_next_word` falls
+        // back to the focus key tripled. keybr.com never shows that, so
+        // the padding skips the draw instead. A fresh Ukrainian profile
+        // ('и' focused, nine real words) and a fresh Greek one ('ε', one
+        // real word) dead-end often enough that filler padding put "иии"
+        // in most Ukrainian lessons.
+        for (lang, focus) in [(Language::Ukrainian, 'и'), (Language::Greek, 'ε')] {
+            let keys = unlocked(lang, 6);
+            let filter = make_filter_focused(&keys, focus);
+            let filler: String = [focus; 3].iter().collect();
+            let mut gen = WordGenerator::with_seed_for(31, lang);
+            for _ in 0..100 {
+                let pool = gen.natural_word_pool(&filter);
+                assert!(
+                    pool.iter().all(|w| *w != filler),
+                    "{}: filler in the pool {pool:?}",
+                    lang.code()
+                );
+                let text = gen.generate_fragment(&filter, 100);
+                assert!(
+                    text.split_whitespace().all(|w| w != filler),
+                    "{}: filler in {text:?}",
+                    lang.code()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_pool_nothing_fits_holds_only_the_filler() {
+        // No real word fits 'q' and 'z', and the phonetic model cannot
+        // finish one either. keybr.com pushes "?" so the lesson has
+        // something to type; the filler is ours, and it is all there is.
+        let filter = make_filter_focused(&['q', 'z'], 'q');
+        let mut gen = WordGenerator::with_seed(123);
+        assert_eq!(gen.natural_word_pool(&filter), ["qqq"]);
     }
 }
