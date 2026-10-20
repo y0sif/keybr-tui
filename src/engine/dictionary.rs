@@ -12,12 +12,18 @@ use crate::engine::language::Language;
 /// characters, one word per line. See `data/README.md`.
 ///
 /// We bucket each word into per-letter buckets corresponding to the
-/// distinct letters it contains. With a focus rule, the candidate pool is
-/// the bucket for its first letter (every word satisfying the rule must
-/// contain that letter); without one, all words are candidates. The bucket
-/// only narrows the pool, so the rule is still verified per word at sample
-/// time. At ~10K words a per-character allowed-set check is plenty fast, no
-/// need for a bitmap index.
+/// distinct letters it contains, each bucket in word-list order. With a
+/// focus rule, the candidates are the bucket for its first letter (every
+/// word satisfying the rule must contain that letter); without one, all
+/// words are candidates. The bucket only narrows the candidates, so the
+/// rule is still verified per word. At ~10K words a per-character
+/// allowed-set check is plenty fast, no need for a bitmap index.
+///
+/// Lessons and combination drills read it differently. A natural-words
+/// lesson takes [`Dictionary::find`]'s matches in word-list order, most
+/// common first, as keybr.com's `Dictionary.find` does, and the generator
+/// asks it for words of three letters or more. A drill samples one word at
+/// a time with [`Dictionary::next_word`], two-letter words included.
 pub struct Dictionary {
     language: Language,
     all_words: Vec<&'static str>,
@@ -93,26 +99,50 @@ impl Dictionary {
     ///
     /// Returns `None` if no word satisfies the filter. Callers should
     /// fall back to phonetic generation in that case.
+    ///
+    /// Combination drills draw their words with this. A natural-words
+    /// lesson builds its pool with [`Dictionary::find`] instead.
     pub fn next_word(&self, filter: &LetterFilter, rng: &mut SimpleRng) -> Option<&'static str> {
         // 1. Reduce the focus to the rule this dictionary can actually
         //    enforce. See `enforceable_rule`.
-        let rule = filter.focused.and_then(|r| self.enforceable_rule(r));
+        let rule = self.enforceable_focus(filter);
 
         // 2. Narrow the candidate pool to the bucket for the rule's first
         //    letter. Every word satisfying the rule contains it, so this
         //    loses no candidates, and for a multi-char rule it is only a
         //    pre-narrowing: `sample_filtered` still checks the rule itself.
-        let pool: Option<&[u32]> = match rule.and_then(|r| self.bucket_letter(r)) {
-            Some(c) => match self.by_letter.get(&c) {
-                Some(bucket) if !bucket.is_empty() => Some(bucket),
-                _ => return None,
-            },
-            // Nothing to enforce, or nothing to index on: consider every
-            // word and let the allowed-set check do the filtering.
-            None => None,
-        };
+        //    An empty bucket yields `None` without touching `rng`.
+        self.sample_filtered(filter, rule, rng, self.bucket(rule))
+    }
 
-        self.sample_filtered(filter, rule, rng, pool)
+    /// Every word that satisfies the filter's focus rule (if any), uses
+    /// only characters in `filter.allowed` and has at least `min_len`
+    /// characters (not bytes), in word-list order, which is most common
+    /// first, stopping at `limit` words.
+    ///
+    /// This is keybr.com's `Dictionary.find` followed by its
+    /// `.slice(0, limit)`, in one pass over the focus letter's bucket, or
+    /// over the whole word list when there is no focus to index on. The
+    /// focus is reduced by `enforceable_focus` first, as in `next_word`.
+    pub fn find(&self, filter: &LetterFilter, min_len: usize, limit: usize) -> Vec<&'static str> {
+        let rule = self.enforceable_focus(filter);
+        let fits =
+            |w: &&'static str| w.chars().count() >= min_len && word_matches_filter(w, filter, rule);
+        match self.bucket(rule) {
+            Some(bucket) => bucket
+                .iter()
+                .map(|&i| self.all_words[i as usize])
+                .filter(fits)
+                .take(limit)
+                .collect(),
+            None => self
+                .all_words
+                .iter()
+                .copied()
+                .filter(fits)
+                .take(limit)
+                .collect(),
+        }
     }
 
     /// True if at least `min` distinct words satisfy `rule` using only
@@ -215,6 +245,15 @@ impl Dictionary {
         }
     }
 
+    /// `filter`'s focus reduced to what this dictionary enforces: see
+    /// `enforceable_rule`.
+    ///
+    /// The generator pads a lesson's pool under the same reduced focus, so
+    /// its phonetic words and `find`'s real words agree on it.
+    pub fn enforceable_focus(&self, filter: &LetterFilter) -> Option<FocusRule> {
+        filter.focused.and_then(|r| self.enforceable_rule(r))
+    }
+
     /// The part of a focus rule the dictionary enforces, which for a `Key`
     /// outside the language's alphabet is nothing at all.
     ///
@@ -234,6 +273,16 @@ impl Dictionary {
         }
     }
 
+    /// The candidates for a word satisfying `rule`: the indices in the
+    /// bucket of `bucket_letter`, empty when no word contains that letter,
+    /// or `None` when there is nothing to enforce or nothing to index on,
+    /// so every word is a candidate and the allowed-set check does the
+    /// filtering.
+    fn bucket(&self, rule: Option<FocusRule>) -> Option<&[u32]> {
+        let c = rule.and_then(|r| self.bucket_letter(r))?;
+        Some(self.by_letter.get(&c).map_or(&[], Vec::as_slice))
+    }
+
     /// The letter whose bucket can hold every word satisfying `rule`: the
     /// key itself, or the first letter of a pattern. `None` means there is
     /// no such bucket and the whole wordlist has to be considered.
@@ -251,11 +300,11 @@ impl Dictionary {
 /// Words hold the language's lowercase letters only by construction, so we
 /// don't need to consider space or uppercase.
 ///
-/// `rule` is the enforceable rule from `next_word`, not `filter.focused`
-/// verbatim. The check is load-bearing rather than a belt-and-braces
-/// repeat of the bucket choice: a bucket only proves the word contains the
-/// rule's first letter, which for a pattern says nothing about order or
-/// position.
+/// `rule` is the enforceable rule from `next_word` or `find`, not
+/// `filter.focused` verbatim. The check is load-bearing rather than a
+/// belt-and-braces repeat of the bucket choice: a bucket only proves the
+/// word contains the rule's first letter, which for a pattern says nothing
+/// about order or position.
 #[inline]
 fn word_matches_filter(word: &str, filter: &LetterFilter, rule: Option<FocusRule>) -> bool {
     word.chars().all(|c| filter.is_allowed(c)) && rule.is_none_or(|rule| rule.matches(word))
@@ -497,6 +546,77 @@ mod tests {
                 assert!(word.chars().all(|c| narrow.contains(&c)), "{word}");
             }
         }
+    }
+
+    #[test]
+    fn find_keeps_word_list_order() {
+        // keybr.com's `Dictionary.find`: matches in word-list order, most
+        // common first, from the focus letter's bucket or from every word.
+        let dict = Dictionary::from_embedded();
+        let allowed: Vec<char> = ('a'..='z').collect();
+        let lines = || Language::English.wordlist().lines();
+        for focus in [None, Some('e'), Some('q')] {
+            let filter = LetterFilter::new(&allowed, focus.map(FocusRule::Key));
+            let expected: Vec<&str> = lines()
+                .filter(|w| w.chars().count() >= 3 && focus.is_none_or(|c| w.contains(c)))
+                .take(50)
+                .collect();
+            assert_eq!(dict.find(&filter, 3, 50), expected, "{focus:?}");
+        }
+    }
+
+    #[test]
+    fn find_respects_filter_length_and_limit() {
+        let dict = Dictionary::from_embedded();
+        let allowed: Vec<char> = vec!['e', 't', 'a', 'o', 'i', 'n', 'r', 's', 'h', 'l'];
+        let filter = LetterFilter::new(&allowed, Some(FocusRule::Key('e')));
+        let all = dict.find(&filter, 0, usize::MAX);
+        assert!(all.len() > 100, "got {}", all.len());
+        for w in &all {
+            assert!(w.contains('e'), "focused key 'e' missing from '{w}'");
+            assert!(w.chars().all(|c| allowed.contains(&c)), "'{w}'");
+        }
+        assert!(all.iter().any(|w| w.len() == 2), "'he' fits");
+
+        // The length bound drops words, the limit cuts the list short, and
+        // neither reorders what is left.
+        let long: Vec<&str> = all.iter().copied().filter(|w| w.len() >= 4).collect();
+        assert_eq!(dict.find(&filter, 4, usize::MAX), long);
+        assert_eq!(dict.find(&filter, 4, 10), &long[..10]);
+    }
+
+    #[test]
+    fn find_counts_characters_not_bytes() {
+        // Every Greek letter takes two bytes, so a two-letter word like
+        // "τε" is four bytes long and must still count as two.
+        let dict = Dictionary::for_language(Language::Greek);
+        let allowed: Vec<char> = Language::Greek.unlock_order()[..6].to_vec();
+        let filter = LetterFilter::new(&allowed, Some(FocusRule::Key('ε')));
+        let all = dict.find(&filter, 0, usize::MAX);
+        assert!(all.contains(&"τε"), "{all:?}");
+        assert_eq!(dict.find(&filter, 3, usize::MAX), ["ντε"]);
+    }
+
+    #[test]
+    fn find_returns_nothing_when_no_word_fits() {
+        let dict = Dictionary::from_embedded();
+        let filter = LetterFilter::new(&['q', 'z'], None);
+        assert!(dict.find(&filter, 0, usize::MAX).is_empty());
+        let filter = LetterFilter::new(&['a', 'b'], Some(FocusRule::Key('q')));
+        assert!(dict.find(&filter, 0, usize::MAX).is_empty());
+    }
+
+    #[test]
+    fn find_treats_non_alphabetic_key_focus_as_unfocused() {
+        // As in `next_word`: a focus no word can satisfy is dropped and the
+        // allowed set is not, so the matches are the unfocused ones.
+        let dict = Dictionary::from_embedded();
+        let narrow: Vec<char> = vec!['a', 'e', 't', 'o', 'n'];
+        let spaced = LetterFilter::new(&narrow, Some(FocusRule::Key(' ')));
+        let unfocused = LetterFilter::new(&narrow, None);
+        let words = dict.find(&spaced, 3, 1000);
+        assert!(!words.is_empty());
+        assert_eq!(words, dict.find(&unfocused, 3, 1000));
     }
 
     #[test]

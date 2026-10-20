@@ -66,9 +66,9 @@ pub struct Config {
     #[serde(default = "default_fragment_length")]
     pub fragment_length: usize,
 
-    /// When true, the word generator prefers real English dictionary
-    /// words; when none match the active letter filter, it falls back
-    /// to the phonetic order-4 model.
+    /// When true, the word generator draws from real dictionary words of
+    /// the practice language that fit the active letter filter, padded
+    /// with phonetic order-4 words when fewer than 15 fit.
     #[serde(default = "default_natural_words")]
     pub natural_words: bool,
 

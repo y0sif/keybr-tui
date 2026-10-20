@@ -63,6 +63,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   families), only the latest family is imported; `--layout all` restores
   merging them. The report names the family imported and the sessions
   skipped.
+- Natural-words lessons skip 2-letter words and draw from the 1,000 most
+  common words that fit your letters.
 
 ### Fixed
 
@@ -74,6 +76,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   needed 33 rows to show all 26). Up/Down, PageUp/PageDown, Home and End
   move it; a line below the list then says how many letters are above and
   below, and the footer shows `[Up/Down] Scroll`.
+- Early lessons in languages where few real words fit the first letters
+  used to cycle a handful of words (a fresh Greek profile read "τε εν ντε
+  ει ει εν ντε", a fresh Russian one "она нота тонна на антенна"). When
+  fewer than 15 real words fit, generated words now fill in, as on
+  keybr.com.
 
 ## [0.2.4] - 2026-09-29
 

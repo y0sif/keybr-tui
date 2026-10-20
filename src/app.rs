@@ -127,9 +127,9 @@ pub struct App {
     pub target_cpm: f64,
     /// Fragment length for text generation.
     pub fragment_length: usize,
-    /// When true, mix real dictionary words into generated text
-    /// (falling back to the phonetic model when no word matches the
-    /// active letter filter).
+    /// When true, lessons draw from real dictionary words that fit the
+    /// active letter filter, padded with phonetic words when fewer than
+    /// 15 fit (as on keybr.com).
     pub natural_words: bool,
     /// Daily practice goal in minutes. 0 hides the daily-goal indicator.
     pub daily_goal_minutes: u32,
