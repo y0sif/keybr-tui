@@ -54,11 +54,12 @@ all segments, highest first). See `ModelLetters` in
 
 ### License
 
-The keybr.com source code is licensed under the [GNU AGPLv3](https://github.com/aradzie/keybr.com/blob/master/LICENSE.md).
+The keybr.com source code is licensed under the [GNU AGPLv3](https://github.com/aradzie/keybr.com/blob/master/LICENSE).
 The phonetic model file is distributed with that source and is used
 here under the same terms. Redistribution of this binary asset within
 the keybr-tui repository preserves attribution to the original
-authors at <https://github.com/aradzie/keybr.com>.
+authors at <https://github.com/aradzie/keybr.com>. keybr-tui is
+distributed under the same license (AGPL-3.0-only).
 
 ## `model-tr.data`
 
@@ -82,7 +83,7 @@ Direct file URL (master branch):
 
 Its unlock order, read from it as above, is
 `e n t i r l h a s c g u m o f d k b p z ü ä ß w ö v y q x j`; a test in
-`src/engine/language.rs` pins it. Same licence as the English model.
+`src/engine/language.rs` pins it. Same license as the English model.
 
 ## `wordlist-en.txt`
 
@@ -113,7 +114,8 @@ Result: 9,906 lines, ~76 KB.
 
 ### License
 
-Same upstream licence as the phonetic model — keybr.com is GNU AGPLv3.
+Same upstream license as the phonetic model: keybr.com is GNU AGPLv3.
+keybr-tui is distributed under the same license (AGPL-3.0-only).
 Attribution is preserved here through this file and through the
 embedded source comment in `src/engine/dictionary.rs`.
 
@@ -139,7 +141,8 @@ characters and 2 are single letters (`u`, `ü`).
 
 ### License
 
-Same upstream licence as above — keybr.com is GNU AGPLv3.
+Same upstream license as above: keybr.com is GNU AGPLv3.
+keybr-tui is distributed under the same license (AGPL-3.0-only).
 
 ## `wordlist-de.txt`
 
@@ -170,7 +173,8 @@ Result: 5,559 lines. Of the 4,441 dropped words, 4,242 are capitalised and
 
 ### License
 
-Same upstream licence as above: keybr.com is GNU AGPLv3.
+Same upstream license as above: keybr.com is GNU AGPLv3.
+keybr-tui is distributed under the same license (AGPL-3.0-only).
 
 ## The other languages
 
@@ -251,7 +255,8 @@ through Rust's `to_uppercase` and the overrides in `SPECS`
 
 ### License
 
-Same upstream licence as above: keybr.com is GNU AGPLv3.
+Same upstream license as above: keybr.com is GNU AGPLv3.
+keybr-tui is distributed under the same license (AGPL-3.0-only).
 
 ## Layout table (`src/engine/layout.rs`)
 
@@ -263,5 +268,6 @@ pick a session's language and layout family. Taken from
 `packages/keybr-keyboard/lib/language.ts`) at commit `05a37bc`:
 <https://github.com/aradzie/keybr.com/blob/05a37bc5265f65ff538c59c613db29442f345d51/packages/keybr-keyboard/lib/layout.ts>
 
-The module comment says how to regenerate it. Same upstream licence:
+The module comment says how to regenerate it. Same upstream license:
 keybr.com is GNU AGPLv3.
+keybr-tui is distributed under the same license (AGPL-3.0-only).

@@ -43,13 +43,15 @@ jobs:
       - name: Package (Unix)
         if: runner.os != 'Windows'
         run: |
+          cp LICENSE NOTICE README.md target/${{ matrix.target }}/release/
           cd target/${{ matrix.target }}/release
-          tar czf ../../../keybr-tui-${{ matrix.target }}.tar.gz ${{ matrix.artifact }}
+          tar czf ../../../keybr-tui-${{ matrix.target }}.tar.gz ${{ matrix.artifact }} LICENSE NOTICE README.md
       - name: Package (Windows)
         if: runner.os == 'Windows'
         run: |
+          Copy-Item LICENSE, NOTICE, README.md -Destination target/${{ matrix.target }}/release/
           cd target/${{ matrix.target }}/release
-          7z a ../../../keybr-tui-${{ matrix.target }}.zip ${{ matrix.artifact }}
+          7z a ../../../keybr-tui-${{ matrix.target }}.zip ${{ matrix.artifact }} LICENSE NOTICE README.md
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

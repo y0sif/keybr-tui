@@ -30,7 +30,7 @@
           meta = with pkgs.lib; {
             description = "Adaptive terminal (TUI) typing trainer in Rust that ports the keybr.com algorithm, runs offline, and imports your keybr.com data";
             homepage = "https://y0sif.github.io/keybr-tui/";
-            license = licenses.mit;
+            license = licenses.agpl3Only;
             maintainers = [ ];
             mainProgram = "keybr-tui";
           };

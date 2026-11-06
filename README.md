@@ -11,7 +11,7 @@
 
 # keybr-tui
 
-[![CI](https://github.com/y0sif/keybr-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/y0sif/keybr-tui/actions/workflows/ci.yml) [![Crates.io](https://img.shields.io/crates/v/keybr-tui.svg)](https://crates.io/crates/keybr-tui) [![docs.rs](https://img.shields.io/docsrs/keybr-tui)](https://docs.rs/keybr-tui) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![MSRV](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
+[![CI](https://github.com/y0sif/keybr-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/y0sif/keybr-tui/actions/workflows/ci.yml) [![Crates.io](https://img.shields.io/crates/v/keybr-tui.svg)](https://crates.io/crates/keybr-tui) [![docs.rs](https://img.shields.io/docsrs/keybr-tui)](https://docs.rs/keybr-tui) [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE) [![MSRV](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
 
 **Adaptive touch-typing practice for the terminal.** keybr-tui times every key you press, finds the ones slowing you down, and builds drills aimed straight at them. It is a faithful port of the [keybr.com](https://www.keybr.com) learning algorithm, runs entirely offline, and can [import your keybr.com history](#bring-your-keybrcom-history).
 
@@ -179,8 +179,8 @@ Stats are stored separately. Run `keybr-tui --data-dir` to find them.
 
 ## Credits
 
-Algorithm inspired by [keybr.com](https://www.keybr.com) by [aradzie](https://github.com/aradzie/keybr.com). Built with [ratatui](https://ratatui.rs/) and [crossterm](https://github.com/crossterm-rs/crossterm).
+keybr-tui ports the learning algorithm of [keybr.com](https://www.keybr.com) by [aradzie](https://github.com/aradzie/keybr.com) and ships its phonetic models, word lists and keyboard layout table. See [data/README.md](data/README.md) for where each file comes from. Built with [ratatui](https://ratatui.rs/) and [crossterm](https://github.com/crossterm-rs/crossterm).
 
 ## License
 
-[MIT](LICENSE)
+Copyright (C) 2026 keybr-tui contributors. keybr-tui is licensed under the [GNU Affero General Public License v3.0 only](LICENSE) because it includes and adapts AGPLv3 material from [keybr.com](https://github.com/aradzie/keybr.com). Releases up to and including 0.3.0 were labelled MIT but already contained that material. See [NOTICE](NOTICE) for third-party and prior-license notices.
