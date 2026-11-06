@@ -4,11 +4,11 @@
 use std::collections::HashMap;
 
 use super::{App, AppScreen, ErrorMode};
+use crate::app::screens::settings::LANGUAGE_ROW;
 use crate::config::{Config, ErrorModeSerde};
 use crate::engine::filter::FocusRule;
 use crate::engine::Language;
 use crate::persistence::{SavedKeyStats, SavedLessonResult, SavedStats};
-use crate::screens::settings::LANGUAGE_ROW;
 
 impl App {
     /// Apply config.toml's settings to a freshly constructed App: what

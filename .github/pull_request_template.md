@@ -16,7 +16,7 @@
 
 ## How was this tested?
 
-<!-- Describe your test plan. If this adds new tests, note where they live (e.g. `src/metrics.rs` unit tests, `tests/` integration tests). -->
+<!-- Describe your test plan. If this adds new tests, note where they live (e.g. `src/metrics/` unit tests, `tests/` integration tests). -->
 
 ## Pre-merge checklist
 

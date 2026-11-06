@@ -3,8 +3,8 @@
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
+use crate::app::screens::progress;
 use crate::app::{App, AppScreen};
-use crate::screens::progress;
 
 /// Esc returns to the menu; the other keys scroll a letter table taller
 /// than the terminal. Every step starts from the offset clamped to what

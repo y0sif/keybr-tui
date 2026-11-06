@@ -15,12 +15,12 @@
 use taria_ratatui::taria::id::IdSpace;
 use taria_ratatui::taria::{Action, Node, Role};
 
+use crate::app::screens::menu::MENU_ITEMS;
+use crate::app::screens::settings::SETTINGS_COUNT;
 use crate::app::{App, AppScreen, ErrorMode};
 use crate::components::progress::tier_for;
 use crate::components::settings::{focus_letter_value, focus_pattern_value};
 use crate::engine::scheduler::forced_extra_letters;
-use crate::screens::menu::MENU_ITEMS;
-use crate::screens::settings::SETTINGS_COUNT;
 
 /// Id space for the main menu's rows: `menu-start-practice`, and so on.
 ///
@@ -275,9 +275,9 @@ fn settings_nodes(app: &App) -> Vec<Node> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::screens::settings::LANGUAGE_ROW;
     use crate::engine::filter::FocusRule;
     use crate::engine::scheduler::UNLOCK_ORDER;
-    use crate::screens::settings::LANGUAGE_ROW;
 
     fn count_focused(nodes: &[Node]) -> usize {
         nodes
