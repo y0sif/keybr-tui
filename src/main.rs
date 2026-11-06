@@ -8,6 +8,7 @@ mod golden_tests;
 mod import;
 mod metrics;
 mod persistence;
+mod screens;
 // The whole taria integration is unix-only: taria's transport is a unix
 // domain socket, so `taria-ratatui` does not compile for Windows. Every
 // touch point below is gated the same way, and the Windows build runs

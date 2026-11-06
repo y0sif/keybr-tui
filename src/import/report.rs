@@ -120,7 +120,7 @@ pub(super) fn family_report(summary: &ImportSummary, choice: LayoutChoice) -> Ve
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::import::test_support::{mixed_english, replay, session};
+    use crate::import::test_support::{mixed_english, replay_latest, session};
     use crate::import::ExportRecord;
 
     #[test]
@@ -130,7 +130,7 @@ mod tests {
             session("en-us", "2024-05-01T12:00:00.000Z"),
             session("en-uk", "2024-05-02T12:00:00.000Z"),
         ];
-        let (_, summary) = replay(&records, 175.0, Language::English);
+        let (_, summary) = replay_latest(&records, 175.0, Language::English);
         assert_eq!(summary.imported, 2);
         assert_eq!(
             summary.layouts,
@@ -197,7 +197,7 @@ mod tests {
             nothing_imported(Language::German, path, &summary),
             "no usable Deutsch records in typing-data.json (2 skipped: other layout, 0 skipped: invalid)"
         );
-        let (_, summary) = replay(&records, 175.0, Language::German);
+        let (_, summary) = replay_latest(&records, 175.0, Language::German);
         assert_eq!(summary.family, None);
         assert_eq!(
             nothing_imported(Language::German, path, &summary),
@@ -247,7 +247,7 @@ mod tests {
                 ..session("en-some-new-layout", "2024-05-02T12:00:00.000Z")
             },
         ];
-        let (_, summary) = replay(&records, 175.0, Language::English);
+        let (_, summary) = replay_latest(&records, 175.0, Language::English);
         assert_eq!(summary.family.as_deref(), Some("en-some-new-layout"));
         assert_eq!(
             nothing_imported(Language::English, path, &summary),
@@ -293,7 +293,7 @@ mod tests {
                    records its sessions under another language's layout and they cannot \
                    be told apart";
         // No session of its own, so no latest family either.
-        let (_, summary) = replay(&records, 175.0, Language::EnglishUk);
+        let (_, summary) = replay_latest(&records, 175.0, Language::EnglishUk);
         assert_eq!(summary.imported, 0);
         assert_eq!(
             nothing_imported(Language::EnglishUk, path, &summary),

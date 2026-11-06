@@ -9,7 +9,7 @@
 ///
 /// Uses Howard Hinnant's "civil_from_days" algorithm (public domain) to map
 /// days-since-1970-01-01 → (year, month, day). Avoids pulling in chrono.
-/// Reference: https://howardhinnant.github.io/date_algorithms.html
+/// Reference: <https://howardhinnant.github.io/date_algorithms.html>
 pub fn today_date_string() -> String {
     match unix_now_secs() {
         Some(now) => today_date_string_at(now),

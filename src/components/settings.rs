@@ -6,9 +6,9 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::screens::settings::LANGUAGE_ROW;
 use crate::app::{App, ErrorMode};
 use crate::engine::filter::FocusRule;
+use crate::screens::settings::LANGUAGE_ROW;
 
 /// Value shown by the "Focus letter" row: the pinned letter, or "Auto"
 /// when the scheduler picks. A pattern pin shares the same field, and

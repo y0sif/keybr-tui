@@ -244,7 +244,7 @@ fn replay_with_window(
         version: 2,
         keys: keys
             .into_iter()
-            .map(|(ch, st)| (ch, SavedKeyStats::from(&st)))
+            .map(|(ch, st)| (ch, SavedKeyStats::from(st)))
             .collect(),
         unlocked_letters: scheduler.active_keys,
         total_lessons: summary.imported as u32,
@@ -270,7 +270,7 @@ fn push_new(list: &mut Vec<String>, value: &str) {
 mod tests {
     use super::*;
     use crate::import::report::family_report;
-    use crate::import::test_support::{entry, mixed_english, record, replay, session};
+    use crate::import::test_support::{entry, mixed_english, record, replay_latest, session};
     use crate::persistence::{datetime_string_from_unix_secs, today_date_string};
 
     #[test]
@@ -280,7 +280,7 @@ mod tests {
             entry('n', 23, 4, 508),
             entry('i', 8, 2, 616),
         ])];
-        let (saved, summary) = replay(&records, 175.0, Language::English);
+        let (saved, summary) = replay_latest(&records, 175.0, Language::English);
 
         assert_eq!(summary.imported, 1);
         let e = &saved.keys[&'e'];
@@ -304,7 +304,7 @@ mod tests {
                 entry('i', 10, 0, 400),
             ]),
         ];
-        let (saved, _) = replay(&records, 175.0, Language::English);
+        let (saved, _) = replay_latest(&records, 175.0, Language::English);
         let e = &saved.keys[&'e'];
         // 0.1 * 200 + 0.9 * 400 = 380; best = min(400, 380) = 380
         assert!((e.filtered_time_ms - 380.0).abs() < 0.01);
@@ -319,7 +319,7 @@ mod tests {
             entry('n', 10, 0, 400),
             entry('b', 1, 1, 0), // keybr writes 0 when no valid timing exists
         ])];
-        let (saved, summary) = replay(&records, 175.0, Language::English);
+        let (saved, summary) = replay_latest(&records, 175.0, Language::English);
         assert_eq!(summary.imported, 1);
         let b = &saved.keys[&'b'];
         assert_eq!(b.attempts, 1);
@@ -337,7 +337,7 @@ mod tests {
             entry('a', 10, 2, 20),     // < 40ms: dropped
             entry('r', 10, 2, 13_000), // > 12s: dropped
         ])];
-        let (saved, _) = replay(&records, 175.0, Language::English);
+        let (saved, _) = replay_latest(&records, 175.0, Language::English);
         assert!(!saved.keys.contains_key(&'a'));
         assert!(!saved.keys.contains_key(&'r'));
     }
@@ -351,7 +351,7 @@ mod tests {
             entry('A', 2, 0, 500),  // uppercase
             entry('(', 3, 0, 600),  // punctuation
         ])];
-        let (saved, summary) = replay(&records, 175.0, Language::English);
+        let (saved, summary) = replay_latest(&records, 175.0, Language::English);
         assert_eq!(summary.imported, 1);
         assert_eq!(saved.keys.len(), 2);
         assert!(saved.keys.contains_key(&'e'));
@@ -378,7 +378,7 @@ mod tests {
         let too_simple = record(vec![entry('e', 10, 0, 400), entry('n', 10, 0, 20)]);
 
         let records = vec![too_short, too_quick, too_simple];
-        let (saved, summary) = replay(&records, 175.0, Language::English);
+        let (saved, summary) = replay_latest(&records, 175.0, Language::English);
         assert_eq!(summary.imported, 0);
         assert_eq!(summary.skipped_invalid, 3);
         assert!(saved.keys.is_empty());
@@ -393,7 +393,7 @@ mod tests {
         ]);
         arabic.layout = "ar-sa".to_string();
         let records = vec![arabic];
-        let (saved, summary) = replay(&records, 175.0, Language::English);
+        let (saved, summary) = replay_latest(&records, 175.0, Language::English);
         assert_eq!(summary.imported, 0);
         assert_eq!(summary.skipped_layout, 1);
         assert!(saved.keys.is_empty());
@@ -409,7 +409,7 @@ mod tests {
         r.speed = 9999.0; // lies
         r.length = 100;
         r.time = 30_000; // 200 cpm = 40 wpm
-        let (saved, _) = replay(&[r], 175.0, Language::English);
+        let (saved, _) = replay_latest(&[r], 175.0, Language::English);
         let last = saved.last_lesson.unwrap();
         assert!((last.wpm - 40.0).abs() < 0.01, "got {}", last.wpm);
     }
@@ -425,7 +425,7 @@ mod tests {
                 ])
             })
             .collect();
-        let (saved, summary) = replay(&records, 175.0, Language::English);
+        let (saved, summary) = replay_latest(&records, 175.0, Language::English);
         assert_eq!(summary.imported, 60);
         assert_eq!(saved.total_lessons, 60);
         assert_eq!(saved.lesson_history.len(), 50);
@@ -440,7 +440,7 @@ mod tests {
         ]);
         r.length = 100;
         r.errors = 10;
-        let (saved, _) = replay(&[r], 175.0, Language::English);
+        let (saved, _) = replay_latest(&[r], 175.0, Language::English);
         let last = saved.last_lesson.unwrap();
         assert!((last.accuracy - 90.0).abs() < f64::EPSILON);
     }
@@ -451,7 +451,7 @@ mod tests {
         // time (342.86ms) — bestConfidence >= 1 for all 26, so the unlock
         // loop should walk the whole order and leave nothing locked.
         let samples: Vec<HistogramEntry> = ('a'..='z').map(|ch| entry(ch, 10, 0, 200)).collect();
-        let (saved, summary) = replay(&[record(samples)], 175.0, Language::English);
+        let (saved, summary) = replay_latest(&[record(samples)], 175.0, Language::English);
         assert_eq!(summary.unlocked_letters, 26);
         assert_eq!(saved.unlocked_letters.len(), 26);
         // All learned by best → no boosted letter, exactly like keybr.
@@ -466,7 +466,7 @@ mod tests {
         let mut samples: Vec<HistogramEntry> =
             "eniarl".chars().map(|ch| entry(ch, 10, 0, 200)).collect();
         samples.push(entry('t', 10, 0, 800));
-        let (saved, summary) = replay(&[record(samples)], 175.0, Language::English);
+        let (saved, summary) = replay_latest(&[record(samples)], 175.0, Language::English);
         assert_eq!(saved.unlocked_letters.len(), 7);
         assert!(saved.unlocked_letters.contains(&'t'));
         assert_eq!(summary.focused_key, Some('t'));
@@ -474,7 +474,7 @@ mod tests {
 
     #[test]
     fn no_records_yields_starter_set() {
-        let (saved, summary) = replay(&[], 175.0, Language::English);
+        let (saved, summary) = replay_latest(&[], 175.0, Language::English);
         assert_eq!(summary.imported, 0);
         assert_eq!(saved.unlocked_letters, vec!['e', 'n', 'i', 'a', 'r', 'l']);
         assert!(saved.keys.is_empty());
@@ -614,7 +614,8 @@ mod tests {
         // the two readings, which would also move `today_date_string()` below.
         let now = unix_now_secs().expect("system clock before the epoch");
         let stamp = format!("{}.000Z", datetime_string_from_unix_secs(now));
-        let (saved, summary) = replay(&[dated_record(&stamp, 30_000)], 175.0, Language::English);
+        let (saved, summary) =
+            replay_latest(&[dated_record(&stamp, 30_000)], 175.0, Language::English);
 
         assert_eq!(summary.imported, 1);
         assert!(
@@ -634,7 +635,7 @@ mod tests {
     fn saved_stats_roundtrip_through_app_restore() {
         // The import output must load through the same path the app uses.
         let samples: Vec<HistogramEntry> = ('a'..='z').map(|ch| entry(ch, 10, 0, 200)).collect();
-        let (saved, _) = replay(&[record(samples)], 175.0, Language::English);
+        let (saved, _) = replay_latest(&[record(samples)], 175.0, Language::English);
         let json = serde_json::to_string(&saved).unwrap();
         let reloaded: SavedStats = serde_json::from_str(&json).unwrap();
         assert_eq!(reloaded.version, 2);
@@ -670,7 +671,7 @@ mod tests {
                 entry('i', 8, 2, 616),
             ]),
         ];
-        let (saved, summary) = replay(&records, 175.0, Language::Turkish);
+        let (saved, summary) = replay_latest(&records, 175.0, Language::Turkish);
         assert_eq!(summary.imported, 1);
         assert_eq!(summary.skipped_layout, 1);
         assert_eq!(summary.layouts, vec!["tr-tr-q".to_string()]);
@@ -705,7 +706,7 @@ mod tests {
             at("tr-tr-f", "2024-05-03T12:00:00.000Z"),
             at("tr-tr-q", "2024-05-02T12:00:00.000Z"),
         ];
-        let (_, summary) = replay(&records, 175.0, Language::Turkish);
+        let (_, summary) = replay_latest(&records, 175.0, Language::Turkish);
         assert_eq!(summary.family.as_deref(), Some("tr-tr-f"));
         assert_eq!(summary.imported, 1);
         assert_eq!(summary.skipped_family, 2);
@@ -744,7 +745,7 @@ mod tests {
                 entry('ş', 10, 1, 400),
             ],
         )];
-        let (_, summary) = replay(&records, 175.0, Language::English);
+        let (_, summary) = replay_latest(&records, 175.0, Language::English);
         assert_eq!(summary.imported, 0);
         assert_eq!(summary.skipped_layout, 1);
     }
@@ -782,7 +783,7 @@ mod tests {
 
     #[test]
     fn default_imports_the_family_of_the_latest_session() {
-        let (_, summary) = replay(&mixed_english("en-colemak"), 175.0, Language::English);
+        let (_, summary) = replay_latest(&mixed_english("en-colemak"), 175.0, Language::English);
         assert_eq!(summary.family.as_deref(), Some("colemak"));
         assert_eq!(summary.imported, 1);
         assert_eq!(summary.skipped_family, 3);
@@ -790,7 +791,7 @@ mod tests {
         assert_eq!(summary.skipped_families, vec!["qwerty".to_string()]);
         assert_eq!(summary.layouts, vec!["en-colemak".to_string()]);
 
-        let (saved, summary) = replay(&mixed_english("en-us"), 175.0, Language::English);
+        let (saved, summary) = replay_latest(&mixed_english("en-us"), 175.0, Language::English);
         assert_eq!(summary.family.as_deref(), Some("qwerty"));
         assert_eq!(summary.imported, 3);
         assert_eq!(summary.skipped_family, 1);
@@ -810,10 +811,10 @@ mod tests {
     fn equal_stamps_go_to_the_later_record() {
         let stamp = "2024-05-01T12:00:00.000Z";
         let records = vec![session("en-colemak", stamp), session("en-us", stamp)];
-        let (_, summary) = replay(&records, 175.0, Language::English);
+        let (_, summary) = replay_latest(&records, 175.0, Language::English);
         assert_eq!(summary.family.as_deref(), Some("qwerty"));
         let records = vec![session("en-us", stamp), session("en-colemak", stamp)];
-        let (_, summary) = replay(&records, 175.0, Language::English);
+        let (_, summary) = replay_latest(&records, 175.0, Language::English);
         assert_eq!(summary.family.as_deref(), Some("colemak"));
     }
 
@@ -823,7 +824,7 @@ mod tests {
             session("en-us", "2024-05-01T12:00:00.000Z"),
             session("en-some-new-layout", "2024-05-02T12:00:00.000Z"),
         ];
-        let (_, summary) = replay(&records, 175.0, Language::English);
+        let (_, summary) = replay_latest(&records, 175.0, Language::English);
         assert_eq!(summary.family.as_deref(), Some("en-some-new-layout"));
         assert_eq!(summary.imported, 1);
         assert_eq!(summary.skipped_families, vec!["qwerty".to_string()]);
@@ -850,7 +851,7 @@ mod tests {
             at("de-ch", "2024-05-03T12:00:00.000Z"),
             at("fr-ch", "2024-05-04T12:00:00.000Z"),
         ];
-        let (saved, summary) = replay(&records, 175.0, Language::German);
+        let (saved, summary) = replay_latest(&records, 175.0, Language::German);
         assert_eq!(summary.family.as_deref(), Some("qwertz"));
         assert_eq!(summary.imported, 2);
         // {CH} French is `qwertz` too, but French: another language.
@@ -858,7 +859,7 @@ mod tests {
         assert_eq!(summary.skipped_family, 0);
         assert_eq!(saved.keys[&'ä'].attempts, 20);
         assert_eq!(saved.keys[&'ß'].attempts, 10);
-        let (_, english) = replay(&records, 175.0, Language::English);
+        let (_, english) = replay_latest(&records, 175.0, Language::English);
         assert_eq!(english.imported, 1);
     }
 }

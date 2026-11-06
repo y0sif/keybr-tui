@@ -177,7 +177,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::tests::{set_active_keys, unlock_all_letters};
+    use crate::app::test_support::{set_active_keys, unlock_all_letters};
     use crate::app::ErrorMode;
     use crate::config::Config;
     use crate::engine::filter::FOCUS_PATTERNS;

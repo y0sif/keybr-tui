@@ -151,6 +151,8 @@ pub(super) fn handle_typed_char(app: &mut App, typed: char) {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
     use crate::events::AppEvent;
     use crate::update::test_support::{make_key, make_test_app};
@@ -309,5 +311,68 @@ mod tests {
         update(&mut app, AppEvent::Key(make_key(KeyCode::Esc)));
         assert_eq!(app.screen, AppScreen::Menu);
         assert!(app.pending_stats_save);
+    }
+
+    // --- Reaction-time samples: only hits inside 40..=12000 ms count ---
+
+    /// Press `a`, the first target of a lesson already under way, `ms`
+    /// after it became the target. The clock only moves forward between
+    /// here and the press, so the measured time is `ms` or a little more.
+    fn hit_a_after(ms: u64) -> App {
+        let mut app = make_test_app("ab");
+        app.key_target_start = Some(
+            Instant::now()
+                .checked_sub(Duration::from_millis(ms))
+                .expect("the monotonic clock has run this long"),
+        );
+        update(&mut app, AppEvent::Key(make_key(KeyCode::Char('a'))));
+        // Timed or not, the hit is a first-try position of the lesson.
+        assert_eq!(app.cursor_pos, 1);
+        assert!(app.first_attempt_correct.contains(&0));
+        assert_eq!(app.lesson_positions, 1);
+        assert_eq!(app.lesson_errors, 0);
+        app
+    }
+
+    #[test]
+    fn a_hit_after_100ms_records_a_time_sample() {
+        let app = hit_a_after(100);
+        let stats = &app.per_key_stats[&'a'];
+        assert_eq!(stats.attempts, 1);
+        assert_eq!(stats.errors, 0);
+        assert_eq!(stats.reaction_times_ms.len(), 1);
+        assert!(stats.reaction_times_ms[0] >= 100);
+    }
+
+    /// A hit outside the window records nothing for the key, not even an
+    /// attempt: `record_hit` is what counts the attempt.
+    #[test]
+    fn a_hit_after_20s_records_no_sample() {
+        let app = hit_a_after(20_000);
+        let stats = &app.per_key_stats[&'a'];
+        assert_eq!(stats.attempts, 0);
+        assert_eq!(stats.errors, 0);
+        assert!(stats.reaction_times_ms.is_empty());
+    }
+
+    /// The floor is inclusive. The measured time can only come out at 40
+    /// ms or above, so this holds however slow the test machine is.
+    #[test]
+    fn a_hit_at_the_40ms_floor_records_a_sample() {
+        let app = hit_a_after(40);
+        let stats = &app.per_key_stats[&'a'];
+        assert_eq!(stats.attempts, 1);
+        assert_eq!(stats.reaction_times_ms.len(), 1);
+    }
+
+    /// The cap itself (exactly 12000 ms) cannot be pinned: the press is
+    /// measured a moment after the start is set, so it can read 12001.
+    /// One past the cap reads 12001 or more and is always rejected.
+    #[test]
+    fn a_hit_just_past_the_12s_cap_records_no_sample() {
+        let app = hit_a_after(12_001);
+        let stats = &app.per_key_stats[&'a'];
+        assert_eq!(stats.attempts, 0);
+        assert!(stats.reaction_times_ms.is_empty());
     }
 }

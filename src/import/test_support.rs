@@ -8,7 +8,7 @@ use super::{ImportSummary, LayoutChoice};
 
 /// [`super::replay`] with the default layout choice, the family of the
 /// latest session, which is all most tests need.
-pub(super) fn replay(
+pub(super) fn replay_latest(
     records: &[ExportRecord],
     target_cpm: f64,
     language: Language,

@@ -50,7 +50,7 @@ The letters and their unlock order are read from the file itself, for
 every language: the letters from the alphabet header, the unlock order as
 keybr.com's `Letter.frequencyOrder` (each letter's frequencies summed over
 all segments, highest first). See `ModelLetters` in
-`src/engine/transition.rs`.
+`src/engine/model.rs`.
 
 ### License
 

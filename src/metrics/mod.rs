@@ -11,7 +11,8 @@ pub const MAX_SAMPLE_MS: u64 = 12_000;
 pub struct KeyStats {
     pub attempts: u32,
     pub errors: u32,
-    /// Most recent reaction times in ms (capped at last 20 samples).
+    /// Most recent reaction times in ms (capped at the last
+    /// `RECENT_CAP` samples).
     pub reaction_times_ms: Vec<u64>,
     /// Exponentially smoothed reaction time (alpha = 0.1), updated once per
     /// lesson with the lesson's mean latency — keybr.com applies its filter
@@ -29,10 +30,14 @@ pub struct KeyStats {
 impl KeyStats {
     const ALPHA: f64 = 0.1;
 
+    /// How many recent reaction times `reaction_times_ms` keeps. The
+    /// stats file stores the same window.
+    pub const RECENT_CAP: usize = 20;
+
     pub fn record_hit(&mut self, reaction_ms: u64) {
         self.attempts += 1;
         self.reaction_times_ms.push(reaction_ms);
-        if self.reaction_times_ms.len() > 20 {
+        if self.reaction_times_ms.len() > Self::RECENT_CAP {
             self.reaction_times_ms.remove(0);
         }
         self.lesson_sum_ms += reaction_ms as f64;

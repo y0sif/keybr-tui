@@ -9,7 +9,8 @@ use crate::persistence::{today_date_string, SavedStats};
 mod focus;
 mod lesson;
 mod profile;
-pub mod screens;
+#[cfg(test)]
+mod test_support;
 
 use focus::compute_available_patterns;
 pub use lesson::{lesson_score, LessonResult};
@@ -154,9 +155,9 @@ pub struct App {
     pub settings_selection: usize,
     /// First letter row the Progress table shows, when the language has
     /// more letters than the terminal has rows for. `update` clamps it to
-    /// `screens::progress::scroll_limits` before every step and `render` clamps it
-    /// again, since a resize that makes room for more rows lowers the
-    /// limit between keys.
+    /// `crate::screens::progress::scroll_limits` before every step, and
+    /// `render` clamps it again, since a resize that makes room for more
+    /// rows lowers the limit between keys.
     pub progress_scroll: usize,
     /// Terminal height in rows, set by `main` at launch and by `update` on
     /// every resize. Only the Progress scroll clamp reads it, since
@@ -343,6 +344,7 @@ impl Default for App {
 
 #[cfg(test)]
 mod tests {
+    use super::test_support::set_active_keys;
     use super::*;
 
     #[test]
@@ -364,24 +366,6 @@ mod tests {
         let app = App::new();
         assert_eq!(app.target_wpm(), 35);
         assert!((app.target_cpm - 175.0).abs() < f64::EPSILON);
-    }
-
-    /// Unlock the whole alphabet, which is what makes every combination
-    /// drill reachable. Mirrors what the scheduler does over a long
-    /// profile, without having to type thousands of characters.
-    ///
-    /// Writing `active_keys` by hand bypasses `run_scheduler_update`, so
-    /// the derived drill list has to be refreshed the same way the
-    /// scheduler path does it.
-    pub(super) fn unlock_all_letters(app: &mut App) {
-        set_active_keys(app, ('a'..='z').collect());
-    }
-
-    /// Replace the unlocked alphabet and refresh what is derived from it.
-    /// The only way these tests should write `active_keys`.
-    pub(super) fn set_active_keys(app: &mut App, keys: Vec<char>) {
-        app.scheduler.active_keys = keys;
-        app.refresh_available_patterns();
     }
 
     #[test]

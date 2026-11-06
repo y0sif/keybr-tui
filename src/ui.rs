@@ -45,7 +45,7 @@ fn render_typing_screen(app: &App, frame: &mut Frame) {
 /// Row D — single-line footer with key hints, centered.
 ///
 /// The mode segment makes the current error mode visible at a glance and
-/// shows what [Tab] will switch to next, so users always know which mode
+/// shows what \[Tab\] will switch to next, so users always know which mode
 /// they're in without trial-and-error. Lesson count moved here from the
 /// dashboard so the dashboard rows stay focused on per-lesson stats.
 fn render_footer(app: &App, frame: &mut Frame, area: Rect) {

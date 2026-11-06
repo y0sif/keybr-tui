@@ -32,8 +32,8 @@ pub enum Applied {
 /// selection id resolves to the same index the arrow keys reach, then the
 /// act lowers into the exact [`KeyEvent`] a human would press, routed
 /// through the same `handle_key` path. An agent therefore cannot reach any
-/// state a keyboard user cannot. Pure like [`update`](super::update): no I/O, only the
-/// deferred save flags.
+/// state a keyboard user cannot. Pure like [`update`](super::update): no
+/// I/O, only the deferred save flags.
 ///
 /// # Typed text goes to the typing screen, never through `handle_key`
 ///
@@ -183,8 +183,8 @@ fn apply_settings_act(app: &mut App, node: &str, action: Action) -> Applied {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::screens::settings::LANGUAGE_ROW;
     use crate::engine::Language;
+    use crate::screens::settings::LANGUAGE_ROW;
     use crate::update::test_support::make_test_app;
     use taria_ratatui::taria::NodeId;
 

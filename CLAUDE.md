@@ -16,11 +16,12 @@ The project follows a Model-View-Update (MVU) pattern:
 
 - `src/app/`: Application state (the Model). All mutable state lives here.
   `mod.rs` defines `App`. `focus.rs`, `lesson.rs` and `profile.rs` hold its
-  methods. `screens.rs` holds the screen structure (menu items, settings rows,
-  progress table geometry) that `update/` and the views share.
+  methods.
 - `src/update/`: Event handling and state mutations (the Update). Never renders.
   One file per screen, plus `agent.rs` for taria agent input (unix only).
 - `src/ui.rs`: Rendering (the View). Reads state, never writes it.
+- `src/screens.rs`: Screen structure shared by `update/` and the views (menu
+  items, settings rows, progress table geometry). Depends on no `App` state.
 - `src/components/`: The widgets and screens `ui.rs` draws.
 - `src/tree.rs`: The taria accessibility tree, a second read-only view for
   agents. Unix only.
