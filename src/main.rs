@@ -3,6 +3,8 @@ mod components;
 mod config;
 mod engine;
 mod events;
+#[cfg(test)]
+mod golden_tests;
 mod import;
 mod metrics;
 mod persistence;
