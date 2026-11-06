@@ -1,4 +1,10 @@
-use crate::engine::confidence;
+pub mod confidence;
+
+/// Shortest and longest plausible time to type one key, in ms, as in
+/// keybr.com's `Histogram.validateSample`. Samples outside this window
+/// carry no timing.
+pub const MIN_SAMPLE_MS: u64 = 40;
+pub const MAX_SAMPLE_MS: u64 = 12_000;
 
 /// Per-key performance data used by the adaptive scheduler.
 #[derive(Default, Clone)]

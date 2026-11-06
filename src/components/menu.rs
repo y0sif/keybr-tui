@@ -7,8 +7,7 @@ use ratatui::{
 };
 
 use crate::app::App;
-
-pub const MENU_ITEMS: &[&str] = &["Start Practice", "View Progress", "Settings", "Quit"];
+use crate::screens::menu::MENU_ITEMS;
 
 pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let v_chunks = Layout::default()

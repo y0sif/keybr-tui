@@ -1,7 +1,5 @@
 use std::collections::HashSet;
 
-use crate::engine::language::Language;
-
 /// What every generated word must satisfy.
 ///
 /// `Key` is the adaptive curriculum's focus, the single weakest letter the
@@ -90,23 +88,6 @@ impl FocusRule {
             }
         }
         out
-    }
-
-    /// Display form: `"E"`, `"CR"`, `"-TION"`. The leading dash is how the
-    /// UI says "word ending" without spending a word on it.
-    #[cfg(test)]
-    pub fn label(&self) -> String {
-        self.label_in(Language::English)
-    }
-
-    /// `label` with `language`'s case rules, so Turkish `i` shows as `İ`
-    /// rather than colliding with dotless `ı` → `I`.
-    pub fn label_in(&self, language: Language) -> String {
-        match self {
-            FocusRule::Key(c) => language.upper(*c),
-            FocusRule::Contains(p) => language.upper_str(p),
-            FocusRule::Suffix(p) => format!("-{}", language.upper_str(p)),
-        }
     }
 
     /// Persistence form, the lowercase mirror of `label`: `"e"`, `"cr"`,
@@ -236,22 +217,6 @@ mod tests {
         );
         // A repeated letter lights up one tile, not two.
         assert_eq!(FocusRule::Suffix("ed").letters(), vec!['e', 'd']);
-    }
-
-    #[test]
-    fn turkish_letters_parse_and_label_with_turkish_case() {
-        assert_eq!(FocusRule::from_config("ş"), Some(FocusRule::Key('ş')));
-        assert_eq!(FocusRule::from_config("ı"), Some(FocusRule::Key('ı')));
-        assert_eq!(FocusRule::Key('i').label_in(Language::Turkish), "İ");
-        assert_eq!(FocusRule::Key('ı').label_in(Language::Turkish), "I");
-        assert_eq!(FocusRule::Key('i').label_in(Language::English), "I");
-    }
-
-    #[test]
-    fn labels_are_uppercase_with_dashed_suffixes() {
-        assert_eq!(FocusRule::Key('e').label(), "E");
-        assert_eq!(FocusRule::Contains("cr").label(), "CR");
-        assert_eq!(FocusRule::Suffix("tion").label(), "-TION");
     }
 
     #[test]

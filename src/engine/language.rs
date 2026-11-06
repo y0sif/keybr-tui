@@ -12,7 +12,7 @@ use std::sync::OnceLock;
 
 use crate::engine::filter::{FocusRule, FOCUS_PATTERNS};
 use crate::engine::layout;
-use crate::engine::transition::ModelLetters;
+use crate::engine::model::ModelLetters;
 
 /// A practice language. English is the default and keeps every file name,
 /// stat and config value exactly as they were before languages existed.
@@ -552,6 +552,28 @@ impl Language {
     }
 }
 
+/// How a focus rule reads in a language. The labels follow the language's
+/// case rules, so they live here beside `Language::upper` rather than with
+/// `FocusRule` in `filter.rs`, which keeps `filter` free of `Language`.
+impl FocusRule {
+    /// Display form: `"E"`, `"CR"`, `"-TION"`. The leading dash is how the
+    /// UI says "word ending" without spending a word on it.
+    #[cfg(test)]
+    pub fn label(&self) -> String {
+        self.label_in(Language::English)
+    }
+
+    /// `label` with `language`'s case rules, so Turkish `i` shows as `İ`
+    /// rather than colliding with dotless `ı` → `I`.
+    pub fn label_in(&self, language: Language) -> String {
+        match self {
+            FocusRule::Key(c) => language.upper(*c),
+            FocusRule::Contains(p) => language.upper_str(p),
+            FocusRule::Suffix(p) => format!("-{}", language.upper_str(p)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -979,5 +1001,21 @@ mod tests {
         assert_eq!(Language::German.stats_file_name(), "stats-de.json");
         assert_eq!(Language::EnglishUk.stats_file_name(), "stats-en-gb.json");
         assert_eq!(Language::Armenian.stats_file_name(), "stats-hy.json");
+    }
+
+    #[test]
+    fn turkish_letters_parse_and_label_with_turkish_case() {
+        assert_eq!(FocusRule::from_config("ş"), Some(FocusRule::Key('ş')));
+        assert_eq!(FocusRule::from_config("ı"), Some(FocusRule::Key('ı')));
+        assert_eq!(FocusRule::Key('i').label_in(Language::Turkish), "İ");
+        assert_eq!(FocusRule::Key('ı').label_in(Language::Turkish), "I");
+        assert_eq!(FocusRule::Key('i').label_in(Language::English), "I");
+    }
+
+    #[test]
+    fn labels_are_uppercase_with_dashed_suffixes() {
+        assert_eq!(FocusRule::Key('e').label(), "E");
+        assert_eq!(FocusRule::Contains("cr").label(), "CR");
+        assert_eq!(FocusRule::Suffix("tion").label(), "-TION");
     }
 }

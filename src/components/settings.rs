@@ -8,14 +8,7 @@ use ratatui::{
 
 use crate::app::{App, ErrorMode};
 use crate::engine::filter::FocusRule;
-
-/// Settings items the user can navigate between.
-pub const SETTINGS_COUNT: usize = 7;
-
-/// Index of the Language row. Last on purpose: `settings_selection`
-/// starts at 0 at launch, so the first visit to Settings never opens on
-/// the Language row. Later visits return to the row last selected.
-pub const LANGUAGE_ROW: usize = 6;
+use crate::screens::settings::LANGUAGE_ROW;
 
 /// Value shown by the "Focus letter" row: the pinned letter, or "Auto"
 /// when the scheduler picks. A pattern pin shares the same field, and

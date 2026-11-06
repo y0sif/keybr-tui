@@ -1,9 +1,10 @@
-pub mod confidence;
 pub mod dictionary;
 pub mod filter;
 pub mod generator;
 pub mod language;
 pub mod layout;
+pub mod model;
+pub mod rng;
 pub mod scheduler;
 pub mod transition;
 

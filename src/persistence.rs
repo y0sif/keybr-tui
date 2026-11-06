@@ -5,6 +5,7 @@ use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
 use crate::engine::Language;
+use crate::metrics::KeyStats;
 
 fn default_version() -> u32 {
     1
@@ -272,6 +273,33 @@ pub struct SavedKeyStats {
     pub best_filtered_time_ms: f64,
     /// Last N reaction times for context (keep 50).
     pub recent_times_ms: Vec<u64>,
+}
+
+impl From<&KeyStats> for SavedKeyStats {
+    fn from(st: &KeyStats) -> Self {
+        SavedKeyStats {
+            attempts: st.attempts,
+            errors: st.errors,
+            filtered_time_ms: st.filtered_time_ms,
+            best_filtered_time_ms: st.best_filtered_time_ms,
+            recent_times_ms: st.reaction_times_ms.clone(),
+        }
+    }
+}
+
+impl From<&SavedKeyStats> for KeyStats {
+    fn from(saved: &SavedKeyStats) -> Self {
+        let mut st = KeyStats::default();
+        st.attempts = saved.attempts;
+        st.errors = saved.errors;
+        st.filtered_time_ms = saved.filtered_time_ms;
+        st.best_filtered_time_ms = saved.best_filtered_time_ms;
+        // Restore recent times (up to 20 most recent, matching KeyStats cap)
+        let recent = &saved.recent_times_ms;
+        let start = recent.len().saturating_sub(20);
+        st.reaction_times_ms = recent[start..].to_vec();
+        st
+    }
 }
 
 /// Persisted form of a completed lesson's headline stats. The

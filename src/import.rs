@@ -14,7 +14,7 @@ use color_eyre::eyre::{eyre, WrapErr};
 use serde::Deserialize;
 
 use crate::engine::{layout, Language, LetterScheduler};
-use crate::metrics::KeyStats;
+use crate::metrics::{KeyStats, MAX_SAMPLE_MS, MIN_SAMPLE_MS};
 use crate::persistence::{
     local_day_utc_bounds_at, today_date_string_at, unix_now_secs, SavedKeyStats, SavedLessonResult,
     SavedStats,
@@ -59,19 +59,18 @@ pub struct HistogramEntry {
     pub time_to_type: u32,
 }
 
-/// Validity thresholds mirroring keybr.com's `Result.isValid` and
-/// `Histogram.validateSample`.
+/// Validity thresholds mirroring keybr.com's `Result.isValid`. Its
+/// `Histogram.validateSample` window is `MIN_SAMPLE_MS..=MAX_SAMPLE_MS`
+/// in `metrics`, shared with live typing.
 const MIN_LENGTH: u32 = 10;
 const MIN_TIME_MS: u64 = 1000;
 const MIN_COMPLEXITY: usize = 3;
 const MIN_SPEED_CPM: f64 = 1.0;
-const MIN_SAMPLE_MS: u32 = 40;
-const MAX_SAMPLE_MS: u32 = 12_000;
 
 /// keybr drops samples with implausible timing entirely; 0 is kept as
 /// "counts, but contributes no timing".
 fn sample_is_plausible(time_to_type: u32) -> bool {
-    time_to_type == 0 || (MIN_SAMPLE_MS..=MAX_SAMPLE_MS).contains(&time_to_type)
+    time_to_type == 0 || (MIN_SAMPLE_MS..=MAX_SAMPLE_MS).contains(&u64::from(time_to_type))
 }
 
 /// Does an export record's timestamp fall inside the half-open window
@@ -332,18 +331,7 @@ fn replay_with_window(
         version: 2,
         keys: keys
             .into_iter()
-            .map(|(ch, st)| {
-                (
-                    ch,
-                    SavedKeyStats {
-                        attempts: st.attempts,
-                        errors: st.errors,
-                        filtered_time_ms: st.filtered_time_ms,
-                        best_filtered_time_ms: st.best_filtered_time_ms,
-                        recent_times_ms: st.reaction_times_ms,
-                    },
-                )
-            })
+            .map(|(ch, st)| (ch, SavedKeyStats::from(&st)))
             .collect(),
         unlocked_letters: scheduler.active_keys,
         total_lessons: summary.imported as u32,

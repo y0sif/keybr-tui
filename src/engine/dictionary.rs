@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::engine::filter::{FocusRule, LetterFilter};
-use crate::engine::generator::SimpleRng;
 use crate::engine::language::Language;
+use crate::engine::rng::SimpleRng;
 
 /// Dictionary of real words in one language, indexed for fast
 /// filter-aware lookup.

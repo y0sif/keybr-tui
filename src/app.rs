@@ -1,12 +1,12 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
-use crate::components::settings::LANGUAGE_ROW;
 use crate::config::{Config, ErrorModeSerde};
 use crate::engine::filter::{FocusRule, MIN_DRILL_WORDS};
 use crate::engine::{Language, LetterFilter, LetterScheduler, WordGenerator};
 use crate::metrics::KeyStats;
 use crate::persistence::{today_date_string, SavedKeyStats, SavedLessonResult, SavedStats};
+use crate::screens::settings::LANGUAGE_ROW;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorMode {
@@ -193,7 +193,7 @@ pub struct App {
     pub settings_selection: usize,
     /// First letter row the Progress table shows, when the language has
     /// more letters than the terminal has rows for. `update` clamps it to
-    /// `progress::scroll_limits` before every step and `render` clamps it
+    /// `screens::progress::scroll_limits` before every step and `render` clamps it
     /// again, since a resize that makes room for more rows lowers the
     /// limit between keys.
     pub progress_scroll: usize,
@@ -257,15 +257,7 @@ impl App {
         if let Some(saved) = saved {
             // Restore per-key stats
             for (ch, saved_key) in &saved.keys {
-                let key_stats = stats.entry(*ch).or_default();
-                key_stats.attempts = saved_key.attempts;
-                key_stats.errors = saved_key.errors;
-                key_stats.filtered_time_ms = saved_key.filtered_time_ms;
-                key_stats.best_filtered_time_ms = saved_key.best_filtered_time_ms;
-                // Restore recent times (up to 20 most recent, matching KeyStats cap)
-                let recent = &saved_key.recent_times_ms;
-                let start = recent.len().saturating_sub(20);
-                key_stats.reaction_times_ms = recent[start..].to_vec();
+                stats.insert(*ch, KeyStats::from(saved_key));
             }
 
             // Restore unlocked letters into scheduler (letters outside the
@@ -777,18 +769,7 @@ impl App {
     pub fn to_saved_stats(&self) -> SavedStats {
         let mut keys = HashMap::new();
         for (ch, key_stats) in &self.per_key_stats {
-            // Keep up to 50 recent reaction times for persistence
-            let recent: Vec<u64> = key_stats.reaction_times_ms.to_vec();
-            keys.insert(
-                *ch,
-                SavedKeyStats {
-                    attempts: key_stats.attempts,
-                    errors: key_stats.errors,
-                    filtered_time_ms: key_stats.filtered_time_ms,
-                    best_filtered_time_ms: key_stats.best_filtered_time_ms,
-                    recent_times_ms: recent,
-                },
-            );
+            keys.insert(*ch, SavedKeyStats::from(key_stats));
         }
 
         SavedStats {

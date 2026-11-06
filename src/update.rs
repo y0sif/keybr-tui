@@ -11,13 +11,14 @@ use taria_ratatui::taria::{Action, AgentInput};
 use taria_ratatui::to_crossterm_key;
 
 use crate::app::{App, AppScreen, ErrorMode};
-use crate::components::menu::MENU_ITEMS;
-use crate::components::progress;
-use crate::components::settings::{LANGUAGE_ROW, SETTINGS_COUNT};
 use crate::engine::filter::FocusRule;
 use crate::engine::Language;
 use crate::events::AppEvent;
+use crate::metrics::{MAX_SAMPLE_MS, MIN_SAMPLE_MS};
 use crate::persistence::today_date_string;
+use crate::screens::menu::MENU_ITEMS;
+use crate::screens::progress;
+use crate::screens::settings::{LANGUAGE_ROW, SETTINGS_COUNT};
 #[cfg(unix)]
 use crate::tree::{menu_item_index, setting_index};
 
@@ -370,7 +371,7 @@ fn handle_typed_char(app: &mut App, typed: char) {
         if target != ' ' {
             if app.first_attempt_correct.contains(&pos) {
                 let stats = app.per_key_stats.entry(target).or_default();
-                if (40..=12000).contains(&reaction_ms) {
+                if (MIN_SAMPLE_MS..=MAX_SAMPLE_MS).contains(&reaction_ms) {
                     stats.record_hit(reaction_ms);
                 }
             }
