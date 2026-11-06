@@ -36,6 +36,8 @@ cargo clippy -- -D warnings
 4. Ensure `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test` all pass before submitting.
 5. Write a clear PR description explaining the what and why of your changes.
 
+Contributions are licensed under AGPL-3.0-only.
+
 ## Architecture
 
 The project follows a Model-View-Update (MVU) pattern:

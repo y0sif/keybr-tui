@@ -31,9 +31,13 @@ use update::update;
 #[cfg(unix)]
 use update::{apply_agent_input, Applied};
 
-/// A terminal typing trainer inspired by keybr.com with adaptive learning.
+/// A terminal typing trainer that ports the keybr.com algorithm.
 #[derive(Parser)]
-#[command(version, about)]
+#[command(
+    version,
+    about,
+    after_help = "Copyright (C) 2026 keybr-tui contributors. Licensed under AGPL-3.0-only. No warranty."
+)]
 struct Cli {
     /// Target typing speed in words per minute.
     #[arg(long)]

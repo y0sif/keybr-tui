@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- License changed from MIT to AGPL-3.0-only. keybr-tui ports the keybr.com
+  algorithm and ships keybr.com's phonetic models, word lists and keyboard
+  layout table. That material is AGPLv3, so keybr-tui now carries the same
+  license. Earlier releases were labelled MIT but already included that material.
+- Release archives now ship LICENSE, NOTICE and README.md next to the binary.
+
 ## [0.3.0] - 2026-10-20
 
 ### Added
