@@ -6,8 +6,8 @@ use ratatui::{
     Frame,
 };
 
+use crate::app::screens::menu::MENU_ITEMS;
 use crate::app::App;
-use crate::screens::menu::MENU_ITEMS;
 
 pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let v_chunks = Layout::default()

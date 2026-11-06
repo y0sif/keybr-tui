@@ -9,6 +9,7 @@ use crate::persistence::{today_date_string, SavedStats};
 mod focus;
 mod lesson;
 mod profile;
+pub mod screens;
 
 use focus::compute_available_patterns;
 pub use lesson::{lesson_score, LessonResult};

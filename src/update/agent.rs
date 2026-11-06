@@ -183,8 +183,8 @@ fn apply_settings_act(app: &mut App, node: &str, action: Action) -> Applied {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::screens::settings::LANGUAGE_ROW;
     use crate::engine::Language;
-    use crate::screens::settings::LANGUAGE_ROW;
     use crate::update::test_support::make_test_app;
     use taria_ratatui::taria::NodeId;
 

@@ -6,21 +6,38 @@ Project constraints and environment for AI agents working on this codebase.
 
 - **MVP only**: Do not implement menus, profile persistence, config files, or multiplayer. Defer everything to post-MVP.
 - **Algorithm fidelity**: The text generator must mirror Keybr's algorithm exactly — no wordlists, no random characters.
-- **State in `App` only**: No mutable globals. All runtime state lives in `src/app.rs`.
-- **Strict MVU separation**: `ui.rs` reads state, never writes it. `update.rs` writes state, never renders.
-- **Terminal-native colors only**: No hex/RGB. Use ANSI colors (the palette is defined in the engine module).
+- **State in `App` only**: No mutable globals. All runtime state lives in `src/app/`.
+- **Strict MVU separation**: `ui.rs` reads state, never writes it. `update/` writes state, never renders.
+- **Terminal-native colors only**: No hex/RGB. Use ANSI colors (colors are set in `src/components/` and `src/ui.rs`).
 
 ## Architecture
 
 The project follows a Model-View-Update (MVU) pattern:
 
-- `src/app.rs` — Application state (the Model). All mutable state lives here.
-- `src/update.rs` — Event handling and state mutations (the Update). Never renders.
-- `src/ui.rs` — Rendering (the View). Reads state, never writes it.
-- `src/engine/` — Adaptive text generation (Markov chains, letter scheduling).
-- `src/metrics.rs` — Per-key statistics and confidence tracking.
-- `src/persistence.rs` — Saving/loading stats and config.
-- `src/events.rs` — Terminal event channel (keyboard input, tick events).
+- `src/app/`: Application state (the Model). All mutable state lives here.
+  `mod.rs` defines `App`. `focus.rs`, `lesson.rs` and `profile.rs` hold its
+  methods. `screens.rs` holds the screen structure (menu items, settings rows,
+  progress table geometry) that `update/` and the views share.
+- `src/update/`: Event handling and state mutations (the Update). Never renders.
+  One file per screen, plus `agent.rs` for taria agent input (unix only).
+- `src/ui.rs`: Rendering (the View). Reads state, never writes it.
+- `src/components/`: The widgets and screens `ui.rs` draws.
+- `src/tree.rs`: The taria accessibility tree, a second read-only view for
+  agents. Unix only.
+- `src/engine/`: Adaptive text generation (Markov chains, letter scheduling).
+  `rng.rs` is the xorshift32 PRNG. `model.rs` reads keybr.com phonetic model
+  files.
+- `src/metrics/`: Per-key statistics. `confidence.rs` computes key confidence
+  from typing speed.
+- `src/import/`: keybr.com data export import (schema, replay, report).
+- `src/persistence/`: Saving/loading stats (`stats.rs`) and the local-day
+  helpers (`localtime.rs`).
+- `src/config.rs`: User settings. It owns `config.toml`, not `persistence/`.
+- `src/events.rs`: Terminal event channel (keyboard input, tick events).
+- `src/golden_tests.rs`: Golden tests. They pin lesson text, scheduler
+  decisions, import replay and the `stats.json` and `config.toml` formats.
+  Never change an expected value in a refactor: a diff there is a behavior
+  change.
 
 ## Environment
 

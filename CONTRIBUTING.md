@@ -25,7 +25,7 @@ cargo test
 
 ```sh
 cargo fmt --all
-cargo clippy -- -D warnings
+cargo clippy --all-targets -- -D warnings
 ```
 
 ## Pull Request Process
@@ -33,7 +33,7 @@ cargo clippy -- -D warnings
 1. Fork the repository and create a feature branch from `main`.
 2. Keep PRs focused: one feature or fix per PR.
 3. Include tests for new functionality where applicable.
-4. Ensure `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test` all pass before submitting.
+4. Ensure `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test` all pass before submitting.
 5. Write a clear PR description explaining the what and why of your changes.
 
 Contributions are licensed under AGPL-3.0-only.
@@ -42,13 +42,14 @@ Contributions are licensed under AGPL-3.0-only.
 
 The project follows a Model-View-Update (MVU) pattern:
 
-- `src/app.rs` -- Application state (the Model). All mutable state lives here.
-- `src/update.rs` -- Event handling and state mutations (the Update). Never renders.
+- `src/app/` -- Application state (the Model). All mutable state lives here.
+- `src/update/` -- Event handling and state mutations (the Update). Never renders.
 - `src/ui.rs` -- Rendering (the View). Reads state, never writes it.
 - `src/engine/` -- Text generation algorithm (Markov chains, letter scheduling).
-- `src/metrics.rs` -- Per-key statistics and confidence tracking.
-- `src/persistence.rs` -- Saving/loading stats and config.
+- `src/metrics/` -- Per-key statistics and confidence tracking.
+- `src/persistence/` -- Saving/loading stats. Config lives in `src/config.rs`.
 - `src/events.rs` -- Terminal event channel (keyboard input, tick events).
+- `src/golden_tests.rs` -- Golden tests that pin observable output. Never change an expected value to make a refactor pass.
 
 Project layout:
 
@@ -56,14 +57,17 @@ Project layout:
 keybr-tui/
 ├── src/
 │   ├── main.rs           # Entry point
-│   ├── app.rs            # Central state (MVU)
-│   ├── update.rs         # State transitions
+│   ├── app/              # Central state (MVU)
+│   ├── update/           # State transitions
 │   ├── ui.rs             # Rendering (read-only state)
+│   ├── tree.rs           # taria accessibility tree (unix only)
 │   ├── events.rs         # Input + tick event channel
 │   ├── tui.rs            # Terminal setup/teardown
-│   ├── metrics.rs        # Per-key statistics
+│   ├── metrics/          # Per-key statistics
 │   ├── config.rs         # Config file parsing
-│   ├── persistence.rs    # Stats save/load
+│   ├── persistence/      # Stats save/load
+│   ├── import/           # keybr.com data import
+│   ├── golden_tests.rs   # Golden regression tests
 │   ├── engine/           # Adaptive text generation
 │   └── components/       # UI widgets
 ├── docs/                 # User-facing docs (comparison, FAQ, troubleshooting)
