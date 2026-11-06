@@ -6,9 +6,9 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::screens::progress::{screen_layout, scrolling_rows};
 use crate::app::App;
 use crate::metrics::KeyStats;
+use crate::screens::progress::{screen_layout, scrolling_rows};
 
 // Column widths.
 // Key (3) | WPM (5) | Best (5) | Attempts (10) | Errors (8) | Status (12)

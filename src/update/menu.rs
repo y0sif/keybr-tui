@@ -3,8 +3,8 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use super::request_stats_save;
-use crate::app::screens::menu::MENU_ITEMS;
 use crate::app::{App, AppScreen};
+use crate::screens::menu::MENU_ITEMS;
 
 pub(super) fn handle_menu_key(app: &mut App, key: KeyEvent) {
     use KeyCode::*;

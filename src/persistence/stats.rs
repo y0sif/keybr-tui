@@ -44,15 +44,23 @@ pub struct SavedKeyStats {
     pub recent_times_ms: Vec<u64>,
 }
 
-impl From<&KeyStats> for SavedKeyStats {
-    fn from(st: &KeyStats) -> Self {
+/// Moves the recent times across, so a caller that owns the stats pays
+/// for no copy.
+impl From<KeyStats> for SavedKeyStats {
+    fn from(st: KeyStats) -> Self {
         SavedKeyStats {
             attempts: st.attempts,
             errors: st.errors,
             filtered_time_ms: st.filtered_time_ms,
             best_filtered_time_ms: st.best_filtered_time_ms,
-            recent_times_ms: st.reaction_times_ms.clone(),
+            recent_times_ms: st.reaction_times_ms,
         }
+    }
+}
+
+impl From<&KeyStats> for SavedKeyStats {
+    fn from(st: &KeyStats) -> Self {
+        SavedKeyStats::from(st.clone())
     }
 }
 
@@ -63,9 +71,9 @@ impl From<&SavedKeyStats> for KeyStats {
         st.errors = saved.errors;
         st.filtered_time_ms = saved.filtered_time_ms;
         st.best_filtered_time_ms = saved.best_filtered_time_ms;
-        // Restore recent times (up to 20 most recent, matching KeyStats cap)
+        // Restore recent times (the most recent, up to KeyStats' cap)
         let recent = &saved.recent_times_ms;
-        let start = recent.len().saturating_sub(20);
+        let start = recent.len().saturating_sub(KeyStats::RECENT_CAP);
         st.reaction_times_ms = recent[start..].to_vec();
         st
     }

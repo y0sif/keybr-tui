@@ -3,8 +3,8 @@
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
-use crate::app::screens::progress;
 use crate::app::{App, AppScreen};
+use crate::screens::progress;
 
 /// Esc returns to the menu; the other keys scroll a letter table taller
 /// than the terminal. Every step starts from the offset clamped to what
@@ -13,7 +13,8 @@ use crate::app::{App, AppScreen};
 pub(super) fn handle_progress_key(app: &mut App, key: KeyEvent) {
     use KeyCode::*;
 
-    let (page, max) = progress::scroll_limits(app);
+    let letters = app.language.unlock_order().len();
+    let (page, max) = progress::scroll_limits(letters, app.terminal_height);
     let offset = app.progress_scroll.min(max);
     match key.code {
         Esc => app.screen = AppScreen::Menu,

@@ -160,7 +160,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::tests::unlock_all_letters;
+    use crate::app::test_support::unlock_all_letters;
     use crate::engine::filter::{FocusRule, FOCUS_PATTERNS};
 
     #[test]

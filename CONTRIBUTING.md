@@ -45,6 +45,7 @@ The project follows a Model-View-Update (MVU) pattern:
 - `src/app/` -- Application state (the Model). All mutable state lives here.
 - `src/update/` -- Event handling and state mutations (the Update). Never renders.
 - `src/ui.rs` -- Rendering (the View). Reads state, never writes it.
+- `src/screens.rs` -- Screen structure shared by `update/` and the views. Depends on no `App` state.
 - `src/engine/` -- Text generation algorithm (Markov chains, letter scheduling).
 - `src/metrics/` -- Per-key statistics and confidence tracking.
 - `src/persistence/` -- Saving/loading stats. Config lives in `src/config.rs`.
@@ -60,6 +61,7 @@ keybr-tui/
 │   ├── app/              # Central state (MVU)
 │   ├── update/           # State transitions
 │   ├── ui.rs             # Rendering (read-only state)
+│   ├── screens.rs        # Screen structure shared by update/ and the views
 │   ├── tree.rs           # taria accessibility tree (unix only)
 │   ├── events.rs         # Input + tick event channel
 │   ├── tui.rs            # Terminal setup/teardown

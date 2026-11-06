@@ -4,10 +4,10 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use super::request_config_save;
-use crate::app::screens::settings::{LANGUAGE_ROW, SETTINGS_COUNT};
 use crate::app::{App, AppScreen, ErrorMode};
 use crate::engine::filter::FocusRule;
 use crate::engine::Language;
+use crate::screens::settings::{LANGUAGE_ROW, SETTINGS_COUNT};
 
 /// Index of the current pin inside a `[none] + values` cycle, where 0 is
 /// the "none" slot, plus the index the step lands on. Shared by both

@@ -17,15 +17,21 @@
 //! since `SavedStats::keys` is a `HashMap` and serializes in random order.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
+use std::time::{Duration, Instant};
+
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::{App, ErrorMode};
 use crate::config::{Config, ErrorModeSerde};
 use crate::engine::filter::FocusRule;
 use crate::engine::scheduler::forced_extra_letters;
 use crate::engine::{Language, LetterFilter, LetterScheduler, WordGenerator};
+use crate::events::AppEvent;
 use crate::import::{replay, ExportRecord, ImportSummary, LayoutChoice};
 use crate::metrics::KeyStats;
 use crate::persistence::{SavedKeyStats, SavedLessonResult, SavedStats};
+use crate::update::update;
 
 /// The default target: 35 WPM, 175 CPM, so a key is learned below
 /// ~342.857 ms.
@@ -1045,6 +1051,229 @@ fn golden_app_to_config() {
 }
 
 // ---------------------------------------------------------------------------
+// 5. Keystrokes through `update`
+// ---------------------------------------------------------------------------
+
+/// One scripted key press on the Typing screen.
+#[derive(Clone, Copy, Debug)]
+enum Stroke {
+    /// The target key, pressed this many ms after it became the target.
+    Hit(u64),
+    /// A key that is not the target.
+    Miss,
+    Backspace,
+    /// Toggle the error mode.
+    Tab,
+}
+
+/// The key every `Miss` presses. A fresh English profile is many
+/// lessons away from unlocking `q`, so it is never the target.
+const MISS: char = 'q';
+
+/// How long the scripts wait before a hit. Well inside the 40..=12000 ms
+/// sample window, and far below the ~343 ms a key needs to count as
+/// learned, so a slow test machine cannot change what the scheduler
+/// sees after the lesson.
+const HIT_MS: u64 = 100;
+
+fn press(app: &mut App, code: KeyCode) {
+    update(app, AppEvent::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+}
+
+/// Reaction-time samples taken across every key. `record_hit` counts an
+/// attempt and `record_error` counts an attempt and an error, so the
+/// hits are what is left.
+fn samples(app: &App) -> u32 {
+    app.per_key_stats
+        .values()
+        .map(|s| s.attempts - s.errors)
+        .sum()
+}
+
+fn sorted_positions(set: &HashSet<usize>) -> Vec<usize> {
+    let mut positions: Vec<usize> = set.iter().copied().collect();
+    positions.sort_unstable();
+    positions
+}
+
+/// The lesson's keystroke accounting, none of it read from the clock.
+fn typing_state(app: &App) -> String {
+    format!(
+        "cursor={} positions={} errors={} correct={} first={} recovered={:?} \
+         marked={:?} ever={:?} samples={} mode={:?}",
+        app.cursor_pos,
+        app.lesson_positions,
+        app.lesson_errors,
+        app.lesson_correct,
+        app.first_attempt_correct.len(),
+        sorted_positions(&app.recovered_positions),
+        sorted_positions(&app.error_positions),
+        sorted_positions(&app.ever_error_positions),
+        samples(app),
+        app.error_mode,
+    )
+}
+
+/// Press `stroke`. A `Hit` first moves its target's start back by its
+/// ms, which is how the scripts control which hits are timed. A lesson's
+/// first key starts that clock itself, so scripts open with a `Miss`,
+/// whose timing never matters.
+fn play(app: &mut App, stroke: Stroke) {
+    let target = app.generated_text.chars().nth(app.cursor_pos);
+    match stroke {
+        Stroke::Hit(ms) => {
+            assert!(
+                app.lesson_start.is_some(),
+                "a lesson's first key times itself"
+            );
+            app.key_target_start = Some(
+                Instant::now()
+                    .checked_sub(Duration::from_millis(ms))
+                    .expect("the monotonic clock has run this long"),
+            );
+            press(app, KeyCode::Char(target.expect("a target")));
+        }
+        Stroke::Miss => {
+            assert_ne!(target, Some(MISS), "a miss must not be the target");
+            press(app, KeyCode::Char(MISS));
+        }
+        Stroke::Backspace => press(app, KeyCode::Backspace),
+        Stroke::Tab => press(app, KeyCode::Tab),
+    }
+}
+
+/// A fresh English profile in `mode` starts a lesson from the menu and
+/// plays `script`, then hits every key up to the last one and presses
+/// `last` on that. Reports each scripted step, then what finishing the
+/// lesson left behind. Nothing reported is read from the clock: no WPM,
+/// no latencies, no daily goal.
+fn keystroke_report(mode: ErrorMode, seed: u32, script: &[Stroke], last: Stroke) -> String {
+    let language = Language::English;
+    let mut app = App::new_with_language(TARGET_WPM, mode, None, language);
+    app.generator = WordGenerator::with_seed_for(seed, language);
+    // Enter on the menu's first entry, Start Practice.
+    press(&mut app, KeyCode::Enter);
+    let mut out = vec![format!(
+        "start: screen={:?} timed={} text: {}",
+        app.screen,
+        app.lesson_start.is_some(),
+        app.generated_text,
+    )];
+
+    for (step, &stroke) in script.iter().enumerate() {
+        let target = app.generated_text.chars().nth(app.cursor_pos);
+        play(&mut app, stroke);
+        out.push(format!(
+            "{step:>2} {stroke:?} at {target:?}: timed={} {}",
+            app.lesson_start.is_some(),
+            typing_state(&app),
+        ));
+    }
+
+    let len = app.generated_text.chars().count();
+    let mut hits = 0;
+    while app.cursor_pos + 1 < len {
+        play(&mut app, Stroke::Hit(HIT_MS));
+        hits += 1;
+    }
+    out.push(format!("then {hits} hits: {}", typing_state(&app)));
+    let target = app.generated_text.chars().nth(app.cursor_pos);
+    play(&mut app, last);
+    out.push(format!("{last:?} at {target:?} ends the lesson"));
+
+    let result = app.last_lesson.as_ref().expect("a finished lesson");
+    out.push(format!(
+        "after: lessons={} history={} accuracy={:.4} unlocked={:?} screen={:?} timed={} \
+         save_stats={} save_config={}",
+        app.lesson_count,
+        app.lesson_history.len(),
+        result.accuracy,
+        result.newly_unlocked,
+        app.screen,
+        app.lesson_start.is_some(),
+        app.pending_stats_save,
+        app.pending_config_save,
+    ));
+    out.push(format!("after: {}", typing_state(&app)));
+    for ch in sorted_keys(&app.per_key_stats) {
+        let st = &app.per_key_stats[&ch];
+        out.push(format!(
+            "{ch} attempts={} errors={} recent={}",
+            st.attempts,
+            st.errors,
+            st.reaction_times_ms.len(),
+        ));
+    }
+    let active: String = app.scheduler.active_keys.iter().collect();
+    out.push(format!(
+        "active: {active} focus: {}",
+        rule_str(app.effective_focus()),
+    ));
+    out.push(format!("next text: {}", app.generated_text));
+    out.join("\n")
+}
+
+/// Seed 3 opens with "rear era earn". A miss moves on; a fixed miss is
+/// recovered and untimed; a hit after 20 s is not even an attempt;
+/// retyping a letter after Backspace times it again; a missed space
+/// touches no key; a second miss on one position counts once for the
+/// lesson; the last key, missed, still ends the lesson.
+#[test]
+fn golden_keystrokes_forgive_mistakes() {
+    use Stroke::*;
+    let script = [
+        Miss,
+        Backspace,
+        Hit(HIT_MS),
+        Hit(HIT_MS),
+        Hit(20_000),
+        Hit(HIT_MS),
+        Backspace,
+        Hit(HIT_MS),
+        Miss,
+        Miss,
+        Tab,
+        Miss,
+        Tab,
+        Miss,
+    ];
+    check(
+        "KEYSTROKES_FORGIVE_MISTAKES",
+        &keystroke_report(ErrorMode::ForgiveMistakes, 3, &script, Miss),
+        KEYSTROKES_FORGIVE_MISTAKES,
+    );
+}
+
+/// The same lesson in stop-on-error. A miss holds the cursor and its
+/// mark outlives the fix; a repeated miss counts once for the lesson;
+/// Backspace clears only the position it lands on; Tab switches modes
+/// mid-lesson; a missed space touches no key.
+#[test]
+fn golden_keystrokes_stop_on_error() {
+    use Stroke::*;
+    let script = [
+        Miss,
+        Miss,
+        Hit(HIT_MS),
+        Hit(HIT_MS),
+        Miss,
+        Backspace,
+        Hit(HIT_MS),
+        Hit(HIT_MS),
+        Tab,
+        Miss,
+        Tab,
+        Miss,
+        Hit(HIT_MS),
+    ];
+    check(
+        "KEYSTROKES_STOP_ON_ERROR",
+        &keystroke_report(ErrorMode::StopOnError, 3, &script, Hit(HIT_MS)),
+        KEYSTROKES_STOP_ON_ERROR,
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Pinned values (captured from v0.3.1)
 // ---------------------------------------------------------------------------
 
@@ -1553,4 +1782,61 @@ const APP_TO_CONFIG: &[&str] = &[
     "focus_letter = \"ş\"",
     "language = \"de\"",
     "",
+];
+const KEYSTROKES_FORGIVE_MISTAKES: &[&str] = &[
+    "start: screen=Typing timed=false text: rear era earn area arena linen nine rare lie lean lane near learn linen real learn ear line nearer inner",
+    " 0 Miss at Some('r'): timed=true cursor=1 positions=1 errors=1 correct=0 first=0 recovered=[] marked=[0] ever=[0] samples=0 mode=ForgiveMistakes",
+    " 1 Backspace at Some('e'): timed=true cursor=0 positions=1 errors=1 correct=0 first=0 recovered=[] marked=[] ever=[0] samples=0 mode=ForgiveMistakes",
+    " 2 Hit(100) at Some('r'): timed=true cursor=1 positions=2 errors=1 correct=1 first=0 recovered=[0] marked=[] ever=[0] samples=0 mode=ForgiveMistakes",
+    " 3 Hit(100) at Some('e'): timed=true cursor=2 positions=3 errors=1 correct=2 first=1 recovered=[0] marked=[] ever=[0] samples=1 mode=ForgiveMistakes",
+    " 4 Hit(20000) at Some('a'): timed=true cursor=3 positions=4 errors=1 correct=3 first=2 recovered=[0] marked=[] ever=[0] samples=1 mode=ForgiveMistakes",
+    " 5 Hit(100) at Some('r'): timed=true cursor=4 positions=5 errors=1 correct=4 first=3 recovered=[0] marked=[] ever=[0] samples=2 mode=ForgiveMistakes",
+    " 6 Backspace at Some(' '): timed=true cursor=3 positions=5 errors=1 correct=4 first=2 recovered=[0] marked=[] ever=[0] samples=2 mode=ForgiveMistakes",
+    " 7 Hit(100) at Some('r'): timed=true cursor=4 positions=6 errors=1 correct=5 first=3 recovered=[0] marked=[] ever=[0] samples=3 mode=ForgiveMistakes",
+    " 8 Miss at Some(' '): timed=true cursor=5 positions=6 errors=1 correct=5 first=3 recovered=[0] marked=[4] ever=[0, 4] samples=3 mode=ForgiveMistakes",
+    " 9 Miss at Some('e'): timed=true cursor=6 positions=7 errors=2 correct=5 first=3 recovered=[0] marked=[4, 5] ever=[0, 4, 5] samples=3 mode=ForgiveMistakes",
+    "10 Tab at Some('r'): timed=true cursor=6 positions=7 errors=2 correct=5 first=3 recovered=[0] marked=[4, 5] ever=[0, 4, 5] samples=3 mode=StopOnError",
+    "11 Miss at Some('r'): timed=true cursor=6 positions=8 errors=3 correct=5 first=3 recovered=[0] marked=[4, 5, 6] ever=[0, 4, 5, 6] samples=3 mode=StopOnError",
+    "12 Tab at Some('r'): timed=true cursor=6 positions=8 errors=3 correct=5 first=3 recovered=[0] marked=[4, 5, 6] ever=[0, 4, 5, 6] samples=3 mode=ForgiveMistakes",
+    "13 Miss at Some('r'): timed=true cursor=7 positions=8 errors=3 correct=5 first=3 recovered=[0] marked=[4, 5, 6] ever=[0, 4, 5, 6] samples=3 mode=ForgiveMistakes",
+    "then 96 hits: cursor=103 positions=86 errors=3 correct=101 first=99 recovered=[0] marked=[4, 5, 6] ever=[0, 4, 5, 6] samples=81 mode=ForgiveMistakes",
+    "Miss at Some('r') ends the lesson",
+    "after: lessons=1 history=1 accuracy=95.4023 unlocked=Some('t') screen=Typing timed=false save_stats=true save_config=true",
+    "after: cursor=0 positions=0 errors=0 correct=0 first=0 recovered=[] marked=[] ever=[] samples=81 mode=ForgiveMistakes",
+    "a attempts=15 errors=0 recent=15",
+    "e attempts=21 errors=1 recent=20",
+    "i attempts=6 errors=0 recent=6",
+    "l attempts=9 errors=0 recent=9",
+    "n attempts=17 errors=0 recent=17",
+    "r attempts=18 errors=4 recent=14",
+    "active: eniarlt focus: t",
+    "next text: tail intent rental taller tire alter anti trailer lantern rat tree tear later letter entire enter internet",
+];
+const KEYSTROKES_STOP_ON_ERROR: &[&str] = &[
+    "start: screen=Typing timed=false text: rear era earn area arena linen nine rare lie lean lane near learn linen real learn ear line nearer inner",
+    " 0 Miss at Some('r'): timed=true cursor=0 positions=1 errors=1 correct=0 first=0 recovered=[] marked=[0] ever=[0] samples=0 mode=StopOnError",
+    " 1 Miss at Some('r'): timed=true cursor=0 positions=1 errors=1 correct=0 first=0 recovered=[] marked=[0] ever=[0] samples=0 mode=StopOnError",
+    " 2 Hit(100) at Some('r'): timed=true cursor=1 positions=2 errors=1 correct=1 first=0 recovered=[0] marked=[0] ever=[0] samples=0 mode=StopOnError",
+    " 3 Hit(100) at Some('e'): timed=true cursor=2 positions=3 errors=1 correct=2 first=1 recovered=[0] marked=[0] ever=[0] samples=1 mode=StopOnError",
+    " 4 Miss at Some('a'): timed=true cursor=2 positions=4 errors=2 correct=2 first=1 recovered=[0] marked=[0, 2] ever=[0, 2] samples=1 mode=StopOnError",
+    " 5 Backspace at Some('a'): timed=true cursor=1 positions=4 errors=2 correct=2 first=0 recovered=[0] marked=[0, 2] ever=[0, 2] samples=1 mode=StopOnError",
+    " 6 Hit(100) at Some('e'): timed=true cursor=2 positions=5 errors=2 correct=3 first=1 recovered=[0] marked=[0, 2] ever=[0, 2] samples=2 mode=StopOnError",
+    " 7 Hit(100) at Some('a'): timed=true cursor=3 positions=6 errors=2 correct=4 first=1 recovered=[0, 2] marked=[0, 2] ever=[0, 2] samples=2 mode=StopOnError",
+    " 8 Tab at Some('r'): timed=true cursor=3 positions=6 errors=2 correct=4 first=1 recovered=[0, 2] marked=[0, 2] ever=[0, 2] samples=2 mode=ForgiveMistakes",
+    " 9 Miss at Some('r'): timed=true cursor=4 positions=7 errors=3 correct=4 first=1 recovered=[0, 2] marked=[0, 2, 3] ever=[0, 2, 3] samples=2 mode=ForgiveMistakes",
+    "10 Tab at Some(' '): timed=true cursor=4 positions=7 errors=3 correct=4 first=1 recovered=[0, 2] marked=[0, 2, 3] ever=[0, 2, 3] samples=2 mode=StopOnError",
+    "11 Miss at Some(' '): timed=true cursor=4 positions=7 errors=3 correct=4 first=1 recovered=[0, 2] marked=[0, 2, 3, 4] ever=[0, 2, 3, 4] samples=2 mode=StopOnError",
+    "12 Hit(100) at Some(' '): timed=true cursor=5 positions=7 errors=3 correct=5 first=1 recovered=[0, 2, 4] marked=[0, 2, 3, 4] ever=[0, 2, 3, 4] samples=2 mode=StopOnError",
+    "then 98 hits: cursor=103 positions=87 errors=3 correct=103 first=99 recovered=[0, 2, 4] marked=[0, 2, 3, 4] ever=[0, 2, 3, 4] samples=82 mode=StopOnError",
+    "Hit(100) at Some('r') ends the lesson",
+    "after: lessons=1 history=1 accuracy=96.5909 unlocked=Some('t') screen=Typing timed=false save_stats=true save_config=true",
+    "after: cursor=0 positions=0 errors=0 correct=0 first=0 recovered=[] marked=[] ever=[] samples=83 mode=StopOnError",
+    "a attempts=16 errors=1 recent=15",
+    "e attempts=22 errors=0 recent=20",
+    "i attempts=6 errors=0 recent=6",
+    "l attempts=9 errors=0 recent=9",
+    "n attempts=17 errors=0 recent=17",
+    "r attempts=17 errors=3 recent=14",
+    "active: eniarlt focus: t",
+    "next text: tail intent rental taller tire alter anti trailer lantern rat tree tear later letter entire enter internet",
 ];

@@ -28,10 +28,11 @@ serde_json = "1"
 directories = "6"
 
 # The local UTC offset comes from `localtime_r` on unix and from the Win32
-# time API on Windows (see `local_utc_offset_secs` in persistence.rs). crossterm
-# declares its own libc as optional and unix-gated, so it is not something
-# crossterm hands us on Windows — gate ours the same way rather than making
-# every target depend on libc directly.
+# time API on Windows (see `local_utc_offset_secs` in
+# persistence/localtime.rs). crossterm declares its own libc as optional
+# and unix-gated, so it is not something crossterm hands us on Windows.
+# Gate ours the same way rather than making every target depend on libc
+# directly.
 #
 # taria-ratatui is unix-only for a harder reason: its transport is a unix
 # domain socket (`std::os::unix::net`), so the crate does not compile for
