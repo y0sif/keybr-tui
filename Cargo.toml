@@ -39,7 +39,7 @@ directories = "6"
 # in this crate, and the Windows build is taria-free.
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-taria-ratatui = "0.2"
+taria-ratatui = "0.4"
 
 # Windows reads the offset via SystemTimeToTzSpecificLocalTime. windows-sys
 # 0.61 is already in the Windows lock tree (dirs-sys, anstyle), so this adds

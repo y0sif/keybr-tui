@@ -1611,22 +1611,23 @@ dependencies = [
 
 [[package]]
 name = "taria"
-version = "0.2.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a74d00d89c0a8add647a53c4d834b7fea094f5d563431cf3c287ee7c772b272f"
+checksum = "8c59878830a5ca46cff5c3f8ebffa81094b1bdfe38132af2ba620d0b10a7e416"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "taria-ratatui"
-version = "0.2.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e8e75d238e381c0d090b211e098414ee42aa5c50302789198ef33bafd8564e2"
+checksum = "ca3df9aeb2e757def75ad3a356434a06b998df8c64eccab2ccac8e6838dc8c0b"
 dependencies = [
  "ratatui",
  "serde_json",
  "taria",
+ "windows-sys",
 ]
 
 [[package]]

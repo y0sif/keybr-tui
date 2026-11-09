@@ -205,8 +205,8 @@ fn main() -> color_eyre::Result<()> {
     };
 
     // Bind the taria layer (agent accessibility) before entering the
-    // alternate screen, so its report lands in the primary buffer. Unix
-    // only: see `bind_taria_layer`.
+    // alternate screen, so a bind failure's warning lands in the primary
+    // buffer. Unix only: see `bind_taria_layer`.
     #[cfg(unix)]
     let mut layer = bind_taria_layer();
 
@@ -268,42 +268,39 @@ fn main() -> color_eyre::Result<()> {
 }
 
 /// Bind the taria layer (agent accessibility). Called before entering the
-/// alternate screen, so whichever line it prints lands in the primary
+/// alternate screen, so a bind failure's warning lands in the primary
 /// buffer.
+///
+/// A successful bind prints nothing: `taria-mcp --app keybr-tui` finds the
+/// socket on its own, so the path is no use to the person typing.
 ///
 /// `bind_or_disabled` cannot fail: a layer that could not bind is inert and
 /// answers every method, so the loop in `main` needs no branch on whether
 /// taria came up, and the app can never refuse to start because of it. The
-/// layer itself never prints — reporting is ours to place.
+/// layer itself never prints, so reporting is ours to place.
 #[cfg(unix)]
 fn bind_taria_layer() -> TariaLayer {
     let layer = TariaLayer::bind_or_disabled("keybr-tui");
-    match layer.bind_error() {
-        None => eprintln!(
-            "keybr-tui: taria socket at {}",
-            layer.socket_path().display()
-        ),
-        Some(err) => {
-            eprintln!("keybr-tui: taria layer disabled ({err}); continuing without it")
-        }
+    if let Some(err) = layer.bind_error() {
+        eprintln!("keybr-tui: taria layer disabled ({err}); continuing without it");
     }
     layer
 }
 
-/// Apply every queued agent input, refining the ack of each one the app
+/// Apply every queued agent input, telling the layer which ones the app
 /// deliberately ignored.
 ///
 /// The layer acks `Delivered` as it hands an input over, which says only
-/// that this loop dequeued it. `Ignored` is the follow-up that tells an
-/// agent waiting on an effect that none is coming — an act on the wrong
-/// screen, an unknown node id, a key the grammar rejects, text sent while
-/// no lesson is running. Last ack wins.
+/// that this loop dequeued it, so returning `Delivered` sends nothing more.
+/// Returning `Ignored` sends the follow-up that tells an agent waiting on an
+/// effect that none is coming: an act on the wrong screen, an unknown node
+/// id, a key the grammar rejects, text sent while no lesson is running. The
+/// layer sends it before the next frame's tree is published.
 #[cfg(unix)]
 fn drain_agent_input(app: &mut App, layer: &TariaLayer) {
-    layer.drain_with_ids(|id, input| {
-        if apply_agent_input(app, input) == Applied::Ignored {
-            layer.ack(id, InputStatus::Ignored);
-        }
+    layer.drain(|input| match apply_agent_input(app, input) {
+        Applied::Handled => InputStatus::Delivered,
+        Applied::Ignored => InputStatus::Ignored,
     });
 }
 
@@ -311,25 +308,26 @@ fn drain_agent_input(app: &mut App, layer: &TariaLayer) {
 /// reached the agent). Call after the terminal is restored.
 #[cfg(unix)]
 fn report_taria_counters(layer: &TariaLayer) {
-    let dropped = layer.dropped_inputs();
+    let stats = layer.stats();
+    let dropped = stats.dropped_inputs;
     if dropped > 0 {
         eprintln!("keybr-tui: dropped {dropped} agent input(s): the app could not keep up");
     }
-    let stale = layer.stale_inputs();
+    let stale = stats.stale_inputs;
     if stale > 0 {
         eprintln!(
             "keybr-tui: discarded {stale} agent input(s): the bridge connection they arrived \
              on ended first"
         );
     }
-    let unknown = layer.unknown_inputs();
+    let unknown = stats.unknown_inputs;
     if unknown > 0 {
         eprintln!(
             "keybr-tui: could not read {unknown} agent input(s): the bridge speaks a newer \
              taria than this build; raise the taria dependency"
         );
     }
-    let acks = layer.dropped_acks();
+    let acks = stats.dropped_acks;
     if acks > 0 {
         eprintln!(
             "keybr-tui: lost the answer to {acks} agent input(s): the bridge read them slower \
