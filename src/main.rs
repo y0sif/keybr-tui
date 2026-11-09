@@ -19,7 +19,11 @@ mod tui;
 mod ui;
 mod update;
 
+use std::process::ExitCode;
+use std::time::Duration;
+
 use clap::Parser;
+use color_eyre::eyre::WrapErr;
 #[cfg(unix)]
 use taria_ratatui::{InputStatus, TariaLayer};
 
@@ -28,7 +32,7 @@ use config::{Config, ErrorModeSerde};
 use engine::Language;
 use events::setup_event_channel;
 use import::LayoutChoice;
-use persistence::SavedStats;
+use persistence::{SaveReport, SavedStats, Saver};
 use ui::view;
 use update::update;
 #[cfg(unix)]
@@ -140,7 +144,7 @@ fn remember_language(cli: Option<Language>, config: &mut Config) {
     }
 }
 
-fn main() -> color_eyre::Result<()> {
+fn main() -> color_eyre::Result<ExitCode> {
     color_eyre::install()?;
 
     let cli = Cli::parse();
@@ -157,7 +161,7 @@ fn main() -> color_eyre::Result<()> {
             }
             None => eprintln!("Could not determine data directory for this platform."),
         }
-        return Ok(());
+        return Ok(ExitCode::SUCCESS);
     }
 
     // --import: replay a keybr.com export into stats.json and exit
@@ -169,7 +173,7 @@ fn main() -> color_eyre::Result<()> {
         // Remembered only once the import succeeded, so the next plain
         // launch opens the language just imported.
         remember_language(cli.language, &mut config);
-        return Ok(());
+        return Ok(ExitCode::SUCCESS);
     }
 
     // --language is also remembered by a run that goes on to the TUI
@@ -213,6 +217,12 @@ fn main() -> color_eyre::Result<()> {
     #[cfg(unix)]
     let mut layer = bind_taria_layer();
 
+    // Every save from here on is written on the saver's thread (see
+    // `persistence::Saver`). Started before the alternate screen, like the
+    // layer, so a failure to start lands in the primary buffer.
+    let saver = Saver::spawn().wrap_err("could not start the thread that saves your stats")?;
+    wait_for_saves_on_panic(&saver);
+
     let mut terminal = tui::init()?;
 
     let mut app = App::new_with_language(target_wpm, error_mode, saved_stats, language);
@@ -253,10 +263,11 @@ fn main() -> color_eyre::Result<()> {
 
         // `update` never touches the disk: it only raises save flags and
         // records a language switch. Flushing here (including on the quit
-        // event, before the loop exits) is the single place user files get
-        // written, and the switch, which loads the new language's stats
-        // and replaces `app`, happens here too.
-        app.flush_pending_saves();
+        // event, before the loop exits) is the single place saves are
+        // requested: it serializes them and queues them on the saver,
+        // whose thread writes them. The switch, which loads the new
+        // language's stats and replaces `app`, happens here too.
+        app.flush_pending_saves(&saver);
     }
 
     tui::restore()?;
@@ -267,7 +278,41 @@ fn main() -> color_eyre::Result<()> {
     #[cfg(unix)]
     report_taria_counters(&layer);
 
-    Ok(())
+    // Waits for the last saves, including the one quitting just queued,
+    // to reach the disk.
+    Ok(report_saves(saver.finish()))
+}
+
+/// With `panic = "abort"` (the release profile) a panic ends the process
+/// as soon as the panic hook returns, before `main` can wait for `saver`,
+/// so the save a lesson or a quit just queued would be lost. This chains a
+/// hook that runs the existing one first (color-eyre's, which prints the
+/// message; ratatui's, installed later by `tui::init`, restores the
+/// terminal before either) and then waits up to 2 s for the queued saves.
+fn wait_for_saves_on_panic(saver: &Saver) {
+    let flush = saver.panic_flush();
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        previous(info);
+        flush.wait(Duration::from_secs(2));
+    }));
+}
+
+/// Print what went wrong with the session's saves, now that the terminal
+/// is restored, and pick the exit code: a save that never reached the disk
+/// makes it non-zero, so a script or a wrapper notices too.
+fn report_saves(report: SaveReport) -> ExitCode {
+    for warning in &report.warnings {
+        eprintln!("{warning}");
+    }
+    for failure in &report.failures {
+        eprintln!("{failure}");
+    }
+    if report.failures.is_empty() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
 }
 
 /// Bind the taria layer (agent accessibility). Called before entering the

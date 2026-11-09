@@ -823,16 +823,15 @@ fn golden_import_named_family() {
 // ---------------------------------------------------------------------------
 //
 // `SavedStats::save` and `Config::save` write to the user's real data and
-// config dirs, so, like the existing persistence tests, these serialize
-// with the exact calls those functions make (`serde_json::to_string_pretty`
-// and `toml::to_string_pretty`) instead.
+// config dirs, so these take the bytes from the functions every save
+// writes (`SavedStats::to_json` and `Config::to_toml`) instead.
 
 fn stats_json(saved: &SavedStats) -> String {
-    serde_json::to_string_pretty(saved).unwrap()
+    saved.to_json().unwrap()
 }
 
 fn config_toml(config: &Config) -> String {
-    toml::to_string_pretty(config).unwrap()
+    config.to_toml().unwrap()
 }
 
 #[test]

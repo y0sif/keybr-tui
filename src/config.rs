@@ -1,7 +1,10 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use color_eyre::eyre::WrapErr;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
+
+use crate::persistence::{read_user_file, write_atomic, Loaded};
 
 fn default_target_wpm() -> u32 {
     35
@@ -144,61 +147,52 @@ impl Config {
         ProjectDirs::from("", "", "keybr-tui").map(|dirs| dirs.config_dir().join("config.toml"))
     }
 
-    /// Load config from disk. Returns defaults if the file doesn't exist or is
-    /// malformed (with a warning printed to stderr).
+    /// Load config.toml for launch: defaults if there is no file, or if it
+    /// is broken, in which case it is moved aside first (see `load_from`)
+    /// with a warning on stderr. Call it before the TUI starts, so the
+    /// warning is still on screen after exit.
     pub fn load() -> Self {
-        let path = match Self::path() {
-            Some(p) => p,
-            None => return Self::default(),
-        };
+        Self::path()
+            .and_then(|path| Self::load_from(&path).found_or_print())
+            .unwrap_or_default()
+    }
 
-        if !path.exists() {
-            return Self::default();
-        }
+    /// Load the config file at `path`. A file that is there but cannot be
+    /// read or parsed is moved aside to `<name>.corrupt-<unix seconds>`
+    /// before this returns, so the next settings change cannot overwrite
+    /// it.
+    pub fn load_from(path: &Path) -> Loaded<Self> {
+        read_user_file(path, "config", "Using defaults.", |contents| {
+            toml::from_str::<Config>(contents)
+        })
+    }
 
-        match std::fs::read_to_string(&path) {
-            Ok(contents) => match toml::from_str::<Config>(&contents) {
-                Ok(cfg) => cfg,
-                Err(e) => {
-                    eprintln!(
-                        "Warning: malformed config at {}: {}. Using defaults.",
-                        path.display(),
-                        e
-                    );
-                    Self::default()
-                }
-            },
-            Err(e) => {
-                eprintln!(
-                    "Warning: could not read config at {}: {}. Using defaults.",
-                    path.display(),
-                    e
-                );
-                Self::default()
-            }
+    /// The file contents a save writes.
+    pub fn to_toml(&self) -> Result<String, toml::ser::Error> {
+        toml::to_string_pretty(self)
+    }
+
+    /// Save config.toml now, on this thread. For `main` before the TUI
+    /// starts; the TUI queues its saves on `persistence::Saver` instead.
+    pub fn save(&self) -> color_eyre::Result<()> {
+        match Self::path() {
+            Some(path) => self.save_to(&path),
+            None => Ok(()),
         }
     }
 
-    /// Save config to disk, creating directories if needed.
-    pub fn save(&self) -> color_eyre::Result<()> {
-        let path = match Self::path() {
-            Some(p) => p,
-            None => return Ok(()),
-        };
-
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-
-        let contents = toml::to_string_pretty(self)?;
-        std::fs::write(&path, contents)?;
-        Ok(())
+    /// Save to `path` atomically (see `persistence::write_atomic`),
+    /// creating directories if needed.
+    pub fn save_to(&self, path: &Path) -> color_eyre::Result<()> {
+        write_atomic(path, self.to_toml()?.as_bytes())
+            .wrap_err_with(|| format!("could not save config to {}", path.display()))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::persistence::test_support::TestDir;
 
     #[test]
     fn config_serialization_roundtrip() {
@@ -387,6 +381,54 @@ mod tests {
         "#;
         let cfg: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(cfg.target_wpm, 40);
+    }
+
+    #[test]
+    fn config_save_to_and_load_from_round_trip() {
+        let dir = TestDir::new("config-round-trip");
+        let path = dir.path().join("keybr-tui").join("config.toml");
+        let cfg = Config {
+            target_wpm: 55,
+            language: "tr".to_string(),
+            ..Config::default()
+        };
+        cfg.save_to(&path).unwrap();
+        let Loaded::Found(back) = Config::load_from(&path) else {
+            panic!("expected the saved config back");
+        };
+        assert_eq!(back.target_wpm, 55);
+        assert_eq!(back.language, "tr");
+        assert!(matches!(
+            Config::load_from(&dir.path().join("missing.toml")),
+            Loaded::Missing
+        ));
+    }
+
+    #[test]
+    fn a_malformed_config_is_kept_aside_not_overwritten() {
+        let dir = TestDir::new("config-malformed");
+        let path = dir.path().join("config.toml");
+        let broken = b"target_wpm = 60\nerror_mode = \"stop-on-err";
+        std::fs::write(&path, broken).unwrap();
+
+        let Loaded::Broken(warning) = Config::load_from(&path) else {
+            panic!("a malformed config must not load");
+        };
+        let aside = dir.only_file_starting_with("config.toml.corrupt-");
+        assert_eq!(std::fs::read(&aside).unwrap(), broken);
+        assert!(!path.exists());
+        assert!(
+            warning.starts_with("Warning: malformed config at "),
+            "{warning}"
+        );
+        assert!(warning.contains(&aside.display().to_string()), "{warning}");
+        assert!(warning.ends_with("Using defaults."), "{warning}");
+
+        // The next settings change writes a new file beside it.
+        Config::default().save_to(&path).unwrap();
+        assert!(matches!(Config::load_from(&path), Loaded::Found(c) if c.target_wpm == 35));
+        assert_eq!(std::fs::read(&aside).unwrap(), broken);
+        assert_eq!(dir.entries().len(), 2, "{:?}", dir.entries());
     }
 
     #[test]

@@ -31,9 +31,18 @@ The project follows a Model-View-Update (MVU) pattern:
 - `src/metrics/`: Per-key statistics. `confidence.rs` computes key confidence
   from typing speed.
 - `src/import/`: keybr.com data export import (schema, replay, report).
-- `src/persistence/`: Saving/loading stats (`stats.rs`) and the local-day
-  helpers (`localtime.rs`).
-- `src/config.rs`: User settings. It owns `config.toml`, not `persistence/`.
+- `src/persistence/`: Saving/loading stats (`stats.rs`), the local-day
+  helpers (`localtime.rs`), how user files are written and read
+  (`files.rs`: every write is an atomic replace, and a file that exists but
+  will not read or parse is moved to `<name>.corrupt-<unix-secs>` instead of
+  being overwritten), and the background writer (`saver.rs`). While the TUI
+  runs, `App::flush_pending_saves` serializes on the UI thread and queues the
+  bytes on `Saver`, whose thread writes every save. The one other disk write,
+  a language switch moving a broken stats file aside, runs on the UI thread
+  after `Saver::flush`, while the writer is idle. `main` waits for the saver
+  on quit and prints its failures after `tui::restore()`.
+- `src/config.rs`: User settings. It owns `config.toml` (its format and
+  path), not `persistence/`, and reads and writes it through `files.rs`.
 - `src/events.rs`: Terminal event channel (keyboard input, tick events).
 - `src/golden_tests.rs`: Golden tests. They pin lesson text, scheduler
   decisions, import replay and the `stats.json` and `config.toml` formats.

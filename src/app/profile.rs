@@ -1,13 +1,14 @@
 //! The App's saved profile: converting to and from stats and config,
-//! deferred saves, and switching practice language.
+//! queueing deferred saves, and switching practice language.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use super::{App, AppScreen, ErrorMode};
 use crate::config::{Config, ErrorModeSerde};
 use crate::engine::filter::FocusRule;
 use crate::engine::Language;
-use crate::persistence::{SavedKeyStats, SavedLessonResult, SavedStats};
+use crate::persistence::{SavedKeyStats, SavedLessonResult, SavedStats, Saver};
 use crate::screens::settings::LANGUAGE_ROW;
 
 impl App {
@@ -35,37 +36,49 @@ impl App {
         self.generator.set_natural_words(self.natural_words);
     }
 
-    /// Perform any saves requested by `update`, clearing the flags, and
-    /// any language switch it recorded. Called from main's event loop, the
-    /// only place that writes to disk, logging errors to stderr without
-    /// crashing.
+    /// Queue any saves requested by `update` on `saver`, clearing the
+    /// flags, and perform any language switch it recorded. Called from
+    /// main's event loop. The contents are serialized here, on the UI
+    /// thread; the writing happens on `saver`'s thread. A failed save is
+    /// kept by `saver` and printed once the terminal is restored.
     ///
-    /// The switch goes first. It writes this language's stats to this
+    /// The switch goes first. It queues this language's stats for this
     /// language's file before the App is replaced, which settles any stats
     /// save already owed, and the App that replaces it requests the config
-    /// save written below.
-    pub fn flush_pending_saves(&mut self) {
+    /// save queued below.
+    pub fn flush_pending_saves(&mut self, saver: &Saver) {
         if let Some(language) = self.pending_language_switch.take() {
             if language != self.language {
-                self.switch_language(language);
+                self.switch_language(language, saver);
             }
         }
         if self.pending_stats_save {
             self.pending_stats_save = false;
-            self.save_stats();
+            self.queue_stats_save(saver);
         }
         if self.pending_config_save {
             self.pending_config_save = false;
-            if let Err(e) = self.to_config().save() {
-                eprintln!("Warning: failed to save config: {e}");
+            if let Some(path) = Config::path() {
+                match self.to_config().to_toml() {
+                    Ok(toml) => saver.write("config", path, toml.into_bytes()),
+                    Err(e) => saver.fail("config", path, e),
+                }
             }
         }
     }
 
-    /// Write this language's stats to its file, logging a failure.
-    fn save_stats(&self) {
-        if let Err(e) = self.to_saved_stats().save(self.language) {
-            eprintln!("Warning: failed to save stats: {e}");
+    /// Queue this language's stats for its file.
+    fn queue_stats_save(&self, saver: &Saver) {
+        if let Some(path) = SavedStats::path(self.language) {
+            self.queue_stats_save_to(saver, path);
+        }
+    }
+
+    /// Queue this App's stats for the file at `path`.
+    fn queue_stats_save_to(&self, saver: &Saver, path: PathBuf) {
+        match self.to_saved_stats().to_json() {
+            Ok(json) => saver.write("stats", path, json.into_bytes()),
+            Err(e) => saver.fail("stats", path, e),
         }
     }
 
@@ -75,11 +88,37 @@ impl App {
     /// `switched_to` builds from them. Disk work, so only
     /// `flush_pending_saves` calls it.
     ///
-    /// A failed save is reported and does not stop the switch, just as a
-    /// failed save on quit does not stop the quit.
-    fn switch_language(&mut self, language: Language) {
-        self.save_stats();
-        let saved = SavedStats::load(language);
+    /// The load waits for `saver` to write everything queued first, since
+    /// a quick A -> B -> A switch would otherwise read A's file before A's
+    /// save reached it. That wait is the one save the UI thread sits out.
+    /// A failed save does not stop the switch, just as a failed save on
+    /// quit does not stop the quit; `saver` reports it at exit, and the
+    /// warning for a broken file the load moved aside goes there too,
+    /// since the alternate screen would hide it now. The failure stays
+    /// reported even if a later save of the file succeeds: what failed to
+    /// save is dropped here, and switching back reads the file as it was.
+    fn switch_language(&mut self, language: Language, saver: &Saver) {
+        self.switch_language_with(language, saver, SavedStats::path);
+    }
+
+    /// `switch_language`, with `stats_path` naming each language's stats
+    /// file (tests point it at a throwaway directory).
+    fn switch_language_with(
+        &mut self,
+        language: Language,
+        saver: &Saver,
+        stats_path: impl Fn(Language) -> Option<PathBuf>,
+    ) {
+        let outgoing = stats_path(self.language);
+        if let Some(path) = outgoing.clone() {
+            self.queue_stats_save_to(saver, path);
+        }
+        saver.flush();
+        if let Some(path) = &outgoing {
+            saver.abandon(path);
+        }
+        let saved = stats_path(language)
+            .and_then(|path| SavedStats::load_from(&path).found_or(|w| saver.warn(w)));
         *self = self.switched_to(language, saved);
     }
 
@@ -214,6 +253,12 @@ fn chrono_now_iso8601() -> String {
 mod tests {
     use super::*;
     use crate::app::test_support::{set_active_keys, unlock_all_letters};
+    use crate::persistence::test_support::TestDir;
+    use crate::persistence::{write_atomic, Loaded};
+    use std::io;
+    use std::path::Path;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
 
     #[test]
     fn to_config_carries_manual_focus() {
@@ -483,5 +528,89 @@ mod tests {
         let mut en = App::new();
         en.running = false;
         assert!(!en.switched_to(Language::Turkish, None).running);
+    }
+
+    // --- Language switch against the saver, in a throwaway directory ---
+
+    /// A saver whose writes fail with EACCES while `read_only` is set, as
+    /// in a data dir made read-only, and go to disk otherwise.
+    fn saver_with_read_only_switch() -> (Saver, Arc<AtomicBool>) {
+        let read_only = Arc::new(AtomicBool::new(true));
+        let flag = Arc::clone(&read_only);
+        let saver = Saver::spawn_with(move |path: &Path, bytes: &[u8]| {
+            if flag.load(Ordering::SeqCst) {
+                Err(io::Error::from(io::ErrorKind::PermissionDenied))
+            } else {
+                write_atomic(path, bytes)
+            }
+        })
+        .unwrap();
+        (saver, read_only)
+    }
+
+    #[test]
+    fn a_lesson_lost_to_a_failed_save_is_reported_after_switching_back() {
+        // A lesson's save fails, the switch away saves it again and fails,
+        // the dir comes back, and switching back reads the OLD file, whose
+        // save then succeeds. The lesson is gone, so its failure must
+        // still be reported at exit.
+        let dir = TestDir::new("switch-lost-lesson");
+        let stats_path = |language: Language| Some(dir.path().join(language.stats_file_name()));
+        let en_path = stats_path(Language::English).unwrap();
+        saved_profile(Language::English, 'e', 4, 6)
+            .save_to(&en_path)
+            .unwrap();
+        let Loaded::Found(saved) = SavedStats::load_from(&en_path) else {
+            panic!("the seeded stats must load");
+        };
+        let (saver, read_only) = saver_with_read_only_switch();
+
+        let mut app = App::new_with_language(
+            35,
+            ErrorMode::ForgiveMistakes,
+            Some(saved),
+            Language::English,
+        );
+        app.lesson_count += 1;
+        app.queue_stats_save_to(&saver, en_path.clone());
+        app.switch_language_with(Language::EnglishUk, &saver, stats_path);
+        read_only.store(false, Ordering::SeqCst);
+        app.switch_language_with(Language::English, &saver, stats_path);
+        assert_eq!(app.lesson_count, 4, "switching back reads the old file");
+        // Quitting saves what was read back, and that save succeeds.
+        app.queue_stats_save_to(&saver, en_path.clone());
+
+        let report = saver.finish();
+        assert_eq!(report.failures.len(), 1, "{report:?}");
+        let failure = &report.failures[0];
+        assert!(
+            failure.starts_with("Error: could not save stats to ")
+                && failure.contains(&en_path.display().to_string()),
+            "{failure}"
+        );
+    }
+
+    #[test]
+    fn a_failed_save_the_switch_then_saves_is_not_reported() {
+        // A passing problem: nothing was read back in between, so the
+        // switch's save holds everything the failed one did.
+        let dir = TestDir::new("switch-recovered-save");
+        let stats_path = |language: Language| Some(dir.path().join(language.stats_file_name()));
+        let en_path = stats_path(Language::English).unwrap();
+        let (saver, read_only) = saver_with_read_only_switch();
+
+        let mut app = App::new();
+        app.lesson_count = 1;
+        app.queue_stats_save_to(&saver, en_path.clone());
+        saver.flush();
+        read_only.store(false, Ordering::SeqCst);
+        app.switch_language_with(Language::German, &saver, stats_path);
+
+        let report = saver.finish();
+        assert!(report.failures.is_empty(), "{report:?}");
+        let Loaded::Found(saved) = SavedStats::load_from(&en_path) else {
+            panic!("the switch must have saved English");
+        };
+        assert_eq!(saved.total_lessons, 1);
     }
 }
