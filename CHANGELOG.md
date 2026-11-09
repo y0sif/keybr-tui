@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- taria integration now uses `taria-ratatui` 0.4. With a 0.4 bridge, an agent
+  input that changes nothing is answered in about 50 ms instead of 500 ms.
+- Launching no longer prints the taria socket path, which showed up after exit.
+  A taria layer that fails to start is still reported.
+
 ## [0.3.1] - 2026-11-06
 
 ### Changed
