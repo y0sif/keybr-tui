@@ -1,12 +1,14 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use color_eyre::eyre::WrapErr;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
 use crate::engine::Language;
 use crate::metrics::KeyStats;
 
+use super::files::{read_user_file, write_atomic, Loaded};
 use super::localtime::today_date_string;
 
 fn default_version() -> u32 {
@@ -145,75 +147,71 @@ impl SavedStats {
             .map(|dirs| dirs.data_dir().join(language.stats_file_name()))
     }
 
-    /// Load stats from disk. Returns `None` if the file doesn't exist.
-    /// Returns `None` with a warning if the file is malformed.
+    /// Load `language`'s stats for launch. `None` for no file, or for a
+    /// broken one, which is moved aside first (see `load_from`) with a
+    /// warning on stderr. Call it before the TUI starts, so the warning
+    /// is still on screen after exit.
     pub fn load(language: Language) -> Option<Self> {
-        let path = Self::path(language)?;
+        Self::load_from(&Self::path(language)?).found_or_print()
+    }
 
-        if !path.exists() {
-            return None;
-        }
+    /// Load the stats file at `path`, migrating older formats. A file that
+    /// is there but cannot be read or parsed is moved aside to
+    /// `<name>.corrupt-<unix seconds>` before this returns, so starting
+    /// fresh never overwrites it.
+    pub fn load_from(path: &Path) -> Loaded<Self> {
+        read_user_file(path, "stats", "Starting fresh.", |contents| {
+            serde_json::from_str::<SavedStats>(contents)
+        })
+        .map(SavedStats::migrated)
+    }
 
-        match std::fs::read_to_string(&path) {
-            Ok(contents) => match serde_json::from_str::<SavedStats>(&contents) {
-                Ok(mut stats) => {
-                    let today = today_date_string();
-                    if stats.version < 2 {
-                        // v1 → v2 migration: reset daily counter, bump version.
-                        stats.today_seconds_practiced = 0;
-                        stats.today_date = String::new();
-                        stats.version = 2;
-                    } else {
-                        // v0.2.0 → v0.2.1 in-schema migration: minutes → seconds.
-                        // Pre-fix `today_minutes_practiced` was almost always 0
-                        // because of the integer-divide bug, but be defensive.
-                        if let Some(legacy_min) = stats.today_minutes_practiced.take() {
-                            if stats.today_seconds_practiced == 0 && legacy_min > 0 {
-                                stats.today_seconds_practiced = legacy_min.saturating_mul(60);
-                            }
-                        }
-                        if stats.today_date != today {
-                            // Same schema, but day rolled over while we were offline.
-                            stats.today_seconds_practiced = 0;
-                            stats.today_date = today;
-                        }
-                    }
-                    Some(stats)
+    /// Bring stats read from an older file up to the current format and
+    /// day.
+    fn migrated(mut self) -> Self {
+        let today = today_date_string();
+        if self.version < 2 {
+            // v1 → v2 migration: reset daily counter, bump version.
+            self.today_seconds_practiced = 0;
+            self.today_date = String::new();
+            self.version = 2;
+        } else {
+            // v0.2.0 → v0.2.1 in-schema migration: minutes → seconds.
+            // Pre-fix `today_minutes_practiced` was almost always 0
+            // because of the integer-divide bug, but be defensive.
+            if let Some(legacy_min) = self.today_minutes_practiced.take() {
+                if self.today_seconds_practiced == 0 && legacy_min > 0 {
+                    self.today_seconds_practiced = legacy_min.saturating_mul(60);
                 }
-                Err(e) => {
-                    eprintln!(
-                        "Warning: malformed stats at {}: {}. Starting fresh.",
-                        path.display(),
-                        e
-                    );
-                    None
-                }
-            },
-            Err(e) => {
-                eprintln!(
-                    "Warning: could not read stats at {}: {}. Starting fresh.",
-                    path.display(),
-                    e
-                );
-                None
             }
+            if self.today_date != today {
+                // Same schema, but day rolled over while we were offline.
+                self.today_seconds_practiced = 0;
+                self.today_date = today;
+            }
+        }
+        self
+    }
+
+    /// The file contents a save writes.
+    pub fn to_json(&self) -> serde_json::Result<String> {
+        serde_json::to_string_pretty(self)
+    }
+
+    /// Save `language`'s stats now, on this thread. For `--import`; the
+    /// TUI queues its saves on `persistence::Saver` instead.
+    pub fn save(&self, language: Language) -> color_eyre::Result<()> {
+        match Self::path(language) {
+            Some(path) => self.save_to(&path),
+            None => Ok(()),
         }
     }
 
-    /// Save stats to disk, creating directories if needed.
-    pub fn save(&self, language: Language) -> color_eyre::Result<()> {
-        let path = match Self::path(language) {
-            Some(p) => p,
-            None => return Ok(()),
-        };
-
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-
-        let contents = serde_json::to_string_pretty(self)?;
-        std::fs::write(&path, contents)?;
-        Ok(())
+    /// Save to `path` atomically (see `write_atomic`), creating
+    /// directories if needed.
+    pub fn save_to(&self, path: &Path) -> color_eyre::Result<()> {
+        write_atomic(path, self.to_json()?.as_bytes())
+            .wrap_err_with(|| format!("could not save stats to {}", path.display()))
     }
 
     /// Delete the stats file from disk (for --reset).
@@ -231,6 +229,7 @@ impl SavedStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::persistence::test_support::TestDir;
 
     #[test]
     fn stats_serialization_roundtrip() {
@@ -336,6 +335,98 @@ mod tests {
         let stats: SavedStats = serde_json::from_str(json).unwrap();
         assert_eq!(stats.today_minutes_practiced, Some(7));
         assert_eq!(stats.today_seconds_practiced, 0);
+    }
+
+    // --- On disk, in a throwaway directory (never the real data dir) ---
+
+    fn sample_stats(total_lessons: u32) -> SavedStats {
+        let mut keys = HashMap::new();
+        keys.insert(
+            'e',
+            SavedKeyStats {
+                attempts: 100,
+                errors: 5,
+                filtered_time_ms: 350.0,
+                best_filtered_time_ms: 280.0,
+                recent_times_ms: vec![300, 310, 290, 320],
+            },
+        );
+        SavedStats {
+            version: 2,
+            keys,
+            unlocked_letters: vec!['e', 't', 'a', 'o', 'i', 'n'],
+            total_lessons,
+            last_session: "1762700000".to_string(),
+            today_seconds_practiced: 0,
+            today_minutes_practiced: None,
+            today_date: today_date_string(),
+            last_lesson: None,
+            lesson_history: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn stats_save_to_and_load_from_round_trip() {
+        let dir = TestDir::new("stats-round-trip");
+        let path = dir.path().join("data").join("stats.json");
+        sample_stats(12).save_to(&path).unwrap();
+        let Loaded::Found(back) = SavedStats::load_from(&path) else {
+            panic!("expected the saved stats back");
+        };
+        assert_eq!(back.total_lessons, 12);
+        assert_eq!(back.keys[&'e'].attempts, 100);
+        assert_eq!(dir.entries_in("data"), ["stats.json"]);
+    }
+
+    #[test]
+    fn a_missing_stats_file_starts_fresh_silently() {
+        let dir = TestDir::new("stats-missing");
+        let loaded = SavedStats::load_from(&dir.path().join("stats.json"));
+        assert!(matches!(loaded, Loaded::Missing));
+        assert!(dir.entries().is_empty());
+    }
+
+    /// Load a stats file holding `broken`, then save fresh stats, checking
+    /// that the broken bytes were kept aside and never overwritten.
+    fn assert_broken_stats_are_kept(name: &str, broken: &[u8]) {
+        let dir = TestDir::new(name);
+        let path = dir.path().join("stats-de.json");
+        std::fs::write(&path, broken).unwrap();
+
+        let Loaded::Broken(warning) = SavedStats::load_from(&path) else {
+            panic!("a broken file must not load");
+        };
+        let aside = dir.only_file_starting_with("stats-de.json.corrupt-");
+        assert_eq!(std::fs::read(&aside).unwrap(), broken);
+        assert!(!path.exists(), "the broken file must be moved, not copied");
+        assert!(
+            warning.starts_with("Warning: malformed stats at "),
+            "{warning}"
+        );
+        assert!(
+            warning.contains(&format!("Moved it to {}", aside.display())),
+            "the warning must say where it went: {warning}"
+        );
+        assert!(warning.ends_with("Starting fresh."), "{warning}");
+
+        // Starting fresh then saving writes a new file beside it.
+        sample_stats(1).save_to(&path).unwrap();
+        assert!(matches!(SavedStats::load_from(&path), Loaded::Found(s) if s.total_lessons == 1));
+        assert_eq!(std::fs::read(&aside).unwrap(), broken);
+        assert_eq!(dir.entries().len(), 2, "{:?}", dir.entries());
+    }
+
+    #[test]
+    fn an_empty_stats_file_is_kept_aside_not_overwritten() {
+        // What a save cut short by a closed terminal used to leave.
+        assert_broken_stats_are_kept("stats-empty", b"");
+    }
+
+    #[test]
+    fn a_truncated_stats_file_is_kept_aside_not_overwritten() {
+        let json = sample_stats(41).to_json().unwrap();
+        let half = &json.as_bytes()[..json.len() / 2];
+        assert_broken_stats_are_kept("stats-truncated", half);
     }
 
     #[test]

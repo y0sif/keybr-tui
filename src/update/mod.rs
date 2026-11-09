@@ -24,7 +24,7 @@ use settings::handle_settings_key;
 use typing::handle_typing_key;
 
 /// Request a stats save. `update` never touches the disk itself — main's
-/// event loop performs the actual write after the event is processed.
+/// event loop queues the actual write after the event is processed.
 /// This keeps the MVU update layer pure and, crucially, stops unit tests
 /// that drive `update` from clobbering the user's real stats file.
 fn request_stats_save(app: &mut App) {

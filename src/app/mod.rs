@@ -166,8 +166,9 @@ pub struct App {
 
     // --- Deferred persistence (MVU purity) ---
     /// Set by `update` when stats should be written; main's event loop
-    /// performs the write and clears the flag. `update` itself never does
-    /// disk I/O, so tests driving it can't touch the user's real files.
+    /// clears the flag and queues the write on the background writer
+    /// (`persistence::Saver`). `update` itself never does disk I/O, so
+    /// tests driving it can't touch the user's real files.
     pub pending_stats_save: bool,
     /// Same as `pending_stats_save`, for the config file.
     pub pending_config_save: bool,
