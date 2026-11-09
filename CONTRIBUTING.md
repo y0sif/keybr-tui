@@ -48,7 +48,8 @@ The project follows a Model-View-Update (MVU) pattern:
 - `src/screens.rs` -- Screen structure shared by `update/` and the views. Depends on no `App` state.
 - `src/engine/` -- Text generation algorithm (Markov chains, letter scheduling).
 - `src/metrics/` -- Per-key statistics and confidence tracking.
-- `src/persistence/` -- Saving/loading stats. Config lives in `src/config.rs`.
+- `src/persistence/` -- Saving/loading stats, atomic file writes and the
+  background writer. Config lives in `src/config.rs`.
 - `src/events.rs` -- Terminal event channel (keyboard input, tick events).
 - `src/golden_tests.rs` -- Golden tests that pin observable output. Never change an expected value to make a refactor pass.
 
@@ -67,7 +68,7 @@ keybr-tui/
 │   ├── tui.rs            # Terminal setup/teardown
 │   ├── metrics/          # Per-key statistics
 │   ├── config.rs         # Config file parsing
-│   ├── persistence/      # Stats save/load
+│   ├── persistence/      # Stats save/load, atomic writes, background writer
 │   ├── import/           # keybr.com data import
 │   ├── golden_tests.rs   # Golden regression tests
 │   ├── engine/           # Adaptive text generation

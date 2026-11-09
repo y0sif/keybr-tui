@@ -44,7 +44,15 @@ keybr-tui --data-dir
 ls -ld ~/.local/share/keybr-tui/
 ```
 
-Make sure the directory exists and is writable by your user.
+Make sure the directory exists and is writable by your user. If a save fails, keybr-tui prints `Error: could not save stats to <path>: <reason>` (or `config`) when you quit, and exits with status 1.
+
+## "Moved it to ... .corrupt-..." warning
+
+**Symptom**: After quitting you see `Warning: malformed stats at <path>: ... Moved it to <path>.corrupt-<time>. Starting fresh.` For the config file it reads `Warning: malformed config at <path>: ... Using defaults.` A file that cannot be read at all says `could not read` instead of `malformed`. Your stats or settings are back to defaults.
+
+**Cause**: The file existed but could not be read or parsed when keybr-tui loaded it (at launch, or on a language switch in Settings). Saves are atomic, so a crash or a closed terminal during a save leaves the old or the new file, never a broken one. A broken file usually comes from an older version killed mid-save, an edit by hand, or a sync tool.
+
+**Fix**: keybr-tui never overwrites the broken file: it is kept next to the original with the `.corrupt-<time>` suffix. To get it back, quit keybr-tui and copy the `.corrupt-<time>` file (once fixed) or a backup over the file the warning names. `<time>` is the Unix time in seconds, with `-1`, `-2` added if that name is taken.
 
 ## Can't find the config file
 
@@ -63,7 +71,7 @@ error_mode = "move-on"
 
 **Symptom**: keybr-tui exits immediately with an error or panic message before the UI appears.
 
-**Cause**: Could be a missing data directory, an incompatible terminal, a corrupted stats file, or a genuine bug.
+**Cause**: Could be a missing data directory, an incompatible terminal, or a genuine bug. A corrupted stats or config file does not crash it: see the `.corrupt-` warning above.
 
 **Fix**: Capture a backtrace and attach it to a GitHub issue so the cause can be identified:
 

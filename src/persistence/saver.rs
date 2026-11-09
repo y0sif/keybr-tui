@@ -1,6 +1,7 @@
 //! The background writer: in-app saves reach the disk on their own thread,
-//! so a slow write (a fsync can take tens of milliseconds on a busy
-//! filesystem) never stalls a keystroke or a frame.
+//! so a slow write (an fsync can take tens of milliseconds on a busy
+//! filesystem) does not stall a keystroke or a frame. Only a language switch
+//! waits for it (see below).
 //!
 //! The UI thread serializes (cheap) and queues `(path, bytes)`; the writer
 //! thread writes each through [`write_atomic`]. Every save is written there.

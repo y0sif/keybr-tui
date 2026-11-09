@@ -15,8 +15,8 @@ Project constraints and environment for AI agents working on this codebase.
 The project follows a Model-View-Update (MVU) pattern:
 
 - `src/app/`: Application state (the Model). All mutable state lives here.
-  `mod.rs` defines `App`. `focus.rs`, `lesson.rs` and `profile.rs` hold its
-  methods.
+  `mod.rs` defines `App` and its constructors. `focus.rs`, `lesson.rs` and
+  `profile.rs` hold the rest of its methods.
 - `src/update/`: Event handling and state mutations (the Update). Never renders.
   One file per screen, plus `agent.rs` for taria agent input (unix only).
 - `src/ui.rs`: Rendering (the View). Reads state, never writes it.
@@ -40,10 +40,13 @@ The project follows a Model-View-Update (MVU) pattern:
   bytes on `Saver`, whose thread writes every save. The one other disk write,
   a language switch moving a broken stats file aside, runs on the UI thread
   after `Saver::flush`, while the writer is idle. `main` waits for the saver
-  on quit and prints its failures after `tui::restore()`.
+  on quit and prints its failures after `tui::restore()`. A panic hook
+  installed in `main` waits up to 2 s for queued saves, since release builds
+  abort on panic and would otherwise drop them.
 - `src/config.rs`: User settings. It owns `config.toml` (its format and
   path), not `persistence/`, and reads and writes it through `files.rs`.
 - `src/events.rs`: Terminal event channel (keyboard input, tick events).
+- `src/tui.rs`: Terminal setup and teardown.
 - `src/golden_tests.rs`: Golden tests. They pin lesson text, scheduler
   decisions, import replay and the `stats.json` and `config.toml` formats.
   Never change an expected value in a refactor: a diff there is a behavior
