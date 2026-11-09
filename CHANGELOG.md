@@ -9,24 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- taria integration now uses `taria-ratatui` 0.4. With a 0.4 bridge, an agent
-  input that changes nothing is answered in about 50 ms instead of 500 ms.
+- Agents using `taria-mcp` 0.4 get an answer to an input that changes nothing
+  within one frame (about 50 ms) instead of after 500 ms. keybr-tui now uses
+  `taria-ratatui` 0.4.
 - Launching no longer prints the taria socket path, which showed up after exit.
-  A taria layer that fails to start is still reported.
+  If taria fails to start, that is still reported.
 
 ### Fixed
 
-- A crash or a closed terminal during a save could leave `stats.json` empty and
-  lose all progress. Saves now write a temporary file and rename it into place,
-  so the stats and config files always hold either the old or the new contents.
+- A crash or a closed terminal during a save could leave the stats file empty
+  and lose all progress. The stats and config files now always hold either the
+  old or the new contents.
 - A stats or config file that cannot be read or parsed is no longer overwritten
   by the next save. It is kept as `<name>.corrupt-<time>` next to the original,
   and the warning says where.
 - A save that fails (a full disk, say) was printed under the full-screen view,
   where nobody could see it. Failures are now reported after exit, and keybr-tui
   exits with a non-zero status.
-- Saves no longer run on the UI thread, so a slow disk no longer makes typing
-  lag at the end of a lesson, on a settings change or when leaving a screen.
+- A slow disk no longer makes the app stall at the end of a lesson, on a
+  settings change or when leaving a lesson. Saves now happen in the background.
 
 ## [0.3.1] - 2026-11-06
 
