@@ -11,9 +11,6 @@ use super::transition::TransitionTable;
 ///
 /// Each next character is sampled from the distribution conditioned on
 /// the previous three characters (with spaces as word boundaries).
-/// Compared to the prior order-2 bigram model, this produces output
-/// that reads as plausible words of the model's language at filter
-/// boundaries.
 pub struct WordGenerator {
     rng: SimpleRng,
     table: TransitionTable,
@@ -187,7 +184,7 @@ impl WordGenerator {
     /// `try_phonetic_word` instead, which has no filler.
     ///
     /// Algorithm (matching keybr.com):
-    /// 1. If there's a focused key, find a 1–3 char prefix containing it.
+    /// 1. If there's a focused key, find a 1 to 3 char prefix containing it.
     /// 2. Otherwise seed with three spaces (word boundary history).
     /// 3. At each step: look up the order-4 segment for the last 3 chars,
     ///    filter to allowed alphabet indices.
@@ -222,7 +219,7 @@ impl WordGenerator {
                 word.push(c);
                 word_len += 1;
             }
-            // Pad/shift history with the prefix chars (right-aligned —
+            // Pad/shift history with the prefix chars (right-aligned:
             // the most recent char of the prefix ends up at history[2]).
             for c in prefix.chars() {
                 if let Some(idx) = self.table.char_to_idx(c) {
@@ -232,7 +229,7 @@ impl WordGenerator {
             }
         }
 
-        // Step 3–7: Extend the word using order-4 sampling.
+        // Steps 3 to 7: Extend the word using order-4 sampling.
         loop {
             if word_len >= MAX_WORD_LEN {
                 break;
@@ -270,7 +267,7 @@ impl WordGenerator {
         Some(word)
     }
 
-    /// Find a 1–3 char prefix containing the focused key.
+    /// Find a 1 to 3 char prefix containing the focused key.
     ///
     /// We bias toward prefixes of length 3 because the order-4 model
     /// needs three characters of history before its conditioning is
@@ -278,7 +275,7 @@ impl WordGenerator {
     /// forward from the word-boundary history `[' ', ' ', ' ']`,
     /// weighting candidates that can reach the focused key.
     fn find_prefix_with_key(&mut self, filter: &LetterFilter, focused: char) -> String {
-        // Strategy: pick a prefix length (1–3), then sample chars
+        // Strategy: pick a prefix length (1 to 3), then sample chars
         // forward respecting the filter, with a slight bias to make
         // sure the focused key appears.
 

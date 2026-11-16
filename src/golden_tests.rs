@@ -2,8 +2,9 @@
 //!
 //! These pin today's exact observable output: the lesson text the app
 //! shows, the scheduler's unlock and focus decisions, a keybr.com import
-//! replay, and the on-disk formats of `stats.json` and `config.toml`. They
-//! exist so a behavior-preserving refactor that drifts fails loudly.
+//! replay, keystroke handling in both error modes, and the on-disk formats
+//! of `stats.json` and `config.toml`. They exist so a behavior-preserving
+//! refactor that drifts fails loudly.
 //!
 //! The expected values were captured from v0.3.1 by running these tests
 //! and pasting what they print (`cargo test golden -- --nocapture` prints

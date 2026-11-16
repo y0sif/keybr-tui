@@ -42,7 +42,7 @@ Each entry gives the symptom, its cause and the fix. For anything else, see [Rep
 
 **Symptom**: After quitting you see `Warning: malformed stats at <path>: ... Moved it to <path>.corrupt-<time>. Starting fresh.` For the config file it ends in `Using defaults.`, and a file that cannot be read at all says `could not read` instead of `malformed`. Your stats or settings are back to defaults.
 
-**Cause**: The file existed but could not be read or parsed when keybr-tui loaded it. In `config.toml`, one invalid value (an unknown `error_mode`, or text where a number belongs) makes the whole file unreadable. Saves never leave a half-written file, so the usual causes are a hand edit or a sync tool.
+**Cause**: The file existed but could not be read or parsed when keybr-tui loaded it. Saves never leave a half-written file, so the usual causes are a hand edit or a sync tool.
 
 **Fix**: keybr-tui never overwrites the broken file: it stays next to the original with the `.corrupt-<time>` suffix (Unix seconds). Quit keybr-tui, then copy the fixed `.corrupt-` file, or a backup, over the file the warning names. [Configuration](configuration.md#configtoml) lists every valid key and value.
 
@@ -50,9 +50,9 @@ Each entry gives the symptom, its cause and the fix. For anything else, see [Rep
 
 **Symptom**: You edited `config.toml` but settings did not change, or you cannot find the file at all.
 
-**Cause**: keybr-tui creates `config.toml` the first time it saves a setting, and its folder depends on the OS. A running keybr-tui rewrites the whole file on its next save, so an edit made while it runs is lost.
+**Cause**: [Configuration](configuration.md#configtoml) gives the file's path on each OS and when keybr-tui writes it.
 
-**Fix**: Change any value on the Settings screen to create the file, quit, then edit it. [Configuration](configuration.md#configtoml) gives its path on each OS and every key.
+**Fix**: Change any value on the Settings screen to create the file, quit, then edit it.
 
 ## Crash on startup
 

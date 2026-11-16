@@ -15,7 +15,7 @@ cargo fmt --all                              # format
 ```
 
 CI runs the gate in [CONTRIBUTING.md#checks](CONTRIBUTING.md#checks), its cargo steps on Linux,
-macOS and Windows. `just check` runs the format, clippy and test steps. Rules:
+macOS and Windows. Rules:
 
 - Never push before every check there passes locally.
 - Commit `Cargo.lock` with every `Cargo.toml` change. It is tracked because the crate ships a
@@ -69,9 +69,7 @@ macOS and Windows. `just check` runs the format, clippy and test steps. Rules:
   `persistence::write_atomic` and read only through `read_user_file` (`persistence/files.rs`).
   In the TUI every save is queued on `persistence::Saver`. A test that touches the disk uses
   `persistence::test_support::TestDir`, never the real config or data directory.
-- Golden tests (`src/golden_tests.rs`) pin lesson text, scheduler decisions, import replay and
-  the `stats.json` and `config.toml` formats. Never change an expected value in a refactor: a
-  diff there is a behavior change.
+- Golden tests: read the `//!` comment of `src/golden_tests.rs` before you touch an expected value.
 
 ## Languages and data
 
@@ -80,9 +78,9 @@ with `include_bytes!` or `include_str!`, so nothing under `data/` is read at run
 normalisation and license of each file are in `data/README.md`, and only there.
 
 - Adding a language: its two files go in `data/` as [data/README.md](data/README.md#adding-a-language) says
-  (the `include` list in `Cargo.toml` packs only `model-*.data` and `wordlist-*.txt`). The code
+  (the `include` list in `Cargo.toml` packs `model-*.data` and `wordlist-*.txt`). The code
   side is a `Language` variant and a `SPECS` row (the `//!` comment of `engine/language.rs`).
-  Then add it to the README's `## Languages` table.
+  Then add it to the README's `## Languages` table and update the language count in README and FAQ.
 - `LAYOUTS` is keybr.com's layout table. Its `//!` comment says how to regenerate it.
 
 ## Docs

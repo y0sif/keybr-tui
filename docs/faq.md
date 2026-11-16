@@ -38,11 +38,11 @@ Yes, in English and English (UK): the Focus pattern row in Settings pins one of 
 
 ## How do I change my target WPM?
 
-Open Settings and change the Target WPM row with `Left`/`Right`, from 10 to 200 in steps of 5. You can also set `target_wpm` in [config.toml](configuration.md#configtoml) or pass `--target-wpm <N>` for one run.
+Open Settings and change the Target WPM row with `Left`/`Right`. You can also set `target_wpm` in [config.toml](configuration.md#configtoml) or pass `--target-wpm <N>` for one run.
 
 ## What does "forgive mistakes" vs "stop on error" do?
 
-In Forgive Mistakes mode (`forgive-mistakes` in config.toml), a wrong key is marked and the cursor still advances, so a typo never blocks the line. In Stop On Error mode (`stop-on-error`), the cursor waits until you type the right character, which trains accuracy more strictly. Press `Tab` while typing to switch.
+In Forgive Mistakes mode (`forgive-mistakes` in config.toml), a wrong key is marked and the cursor still advances, so a typo never blocks the line. In Stop On Error mode (`stop-on-error`), the cursor waits until you type the right character, which trains accuracy more strictly.
 
 ## Can I use a Dvorak or Colemak layout?
 
@@ -54,7 +54,7 @@ Yes: keybr-tui teaches 27 languages, listed with their codes under [Languages](.
 
 ## What does "taria layer disabled" mean?
 
-It means keybr-tui could not open its taria socket, which lets AI agents read the screen and drive the app; everything else works as usual. On Linux and macOS keybr-tui opens this socket at `$XDG_RUNTIME_DIR/taria/keybr-tui.sock` (or under a `taria-<user>` folder in the temp directory) and removes it on exit. Set `TARIA_SOCK` to another path if the default one is not usable.
+It means keybr-tui could not open its taria socket, which lets AI agents read the screen and drive the app; everything else works as usual. On Linux and macOS an agent connects with `taria-mcp --app keybr-tui`, which finds the socket at `$XDG_RUNTIME_DIR/taria/keybr-tui.sock` (or under a `taria-<user>` folder in the temp directory). If that path is not usable, set `TARIA_SOCK` to another one for both programs.
 
 ## How can I contribute?
 
