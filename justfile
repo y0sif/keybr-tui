@@ -1,4 +1,4 @@
-# keybr-tui developer task runner — recipes for common workflows. See https://just.systems
+# keybr-tui developer task runner: recipes for common workflows. See https://just.systems
 
 # Default: list all available recipes
 default:
@@ -28,8 +28,12 @@ fmt-check:
 lint:
     cargo clippy --all-targets -- -D warnings
 
-# Pre-push gate: formatting, lints, and tests must all pass
-check: fmt-check lint test
+# Check the docs (allowed paths, private data, wording, budgets; used in CI)
+docs:
+    ./scripts/check-docs.sh
+
+# Pre-push gate: formatting, lints, tests and docs must all pass
+check: fmt-check lint test docs
 
 # Build the optimized release binary
 release:
