@@ -1,3 +1,8 @@
+//! User settings and `config.toml`. This module owns the file's format
+//! (the serde shape of [`Config`]) and its path, not `persistence`, and it
+//! reads and writes the file through `persistence::read_user_file` and
+//! `write_atomic`. The golden tests pin the format.
+
 use std::path::{Path, PathBuf};
 
 use color_eyre::eyre::WrapErr;
@@ -92,7 +97,7 @@ pub struct Config {
     /// User-pinned focus letter (keybr's manual lesson focus); `None`
     /// means the scheduler picks automatically. The `skip_serializing_if`
     /// is load-bearing: TOML cannot represent `None`, so serializing it
-    /// would make `Config::save()` error — the key is omitted instead.
+    /// would make `Config::save()` error, so the key is omitted instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub focus_letter: Option<char>,
 
