@@ -7,12 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-11-17
+
 ### Changed
 
 - Agents using `taria-mcp` 0.4 get an answer within one frame to an input that
   changes nothing. keybr-tui now uses `taria-ratatui` 0.4.
 - Launching no longer prints the taria socket path, which showed up after exit.
   If taria fails to start, that is still reported.
+- The docs match the app again, and a new configuration page lists every
+  setting and `config.toml` key.
 
 ### Fixed
 

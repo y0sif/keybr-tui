@@ -1,6 +1,6 @@
 # Maintainer: y0sif <https://github.com/y0sif>
 pkgname=keybr-tui
-pkgver=0.3.1
+pkgver=0.3.2
 pkgrel=1
 pkgdesc="Adaptive TUI typing trainer in Rust, bringing keybr.com's algorithm to your terminal. Offline touch-typing practice that imports your keybr.com data export."
 arch=('x86_64')
