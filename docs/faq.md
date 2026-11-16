@@ -30,7 +30,7 @@ Any terminal with the 16 standard ANSI colors and a monospace font works: Alacri
 
 ## Why does keybr-tui keep showing me the same letter?
 
-That letter is your focus key, the active letter furthest below your target speed. keybr-tui puts it in every word until its speed reaches the target, then moves on to the next weakest letter.
+The letter keybr-tui keeps showing is your focus key: the active letter furthest below your target speed. keybr-tui puts it in every word until its speed reaches the target, then moves on to the next weakest letter.
 
 ## Can I drill specific letter combinations, like word endings?
 
@@ -54,7 +54,7 @@ Yes: keybr-tui teaches 27 languages, listed with their codes under [Languages](.
 
 ## What does "taria layer disabled" mean?
 
-It means keybr-tui could not open its taria socket, which lets AI agents read the screen and drive the app; everything else works as usual. On Linux and macOS an agent connects with `taria-mcp --app keybr-tui`, which finds the socket at `$XDG_RUNTIME_DIR/taria/keybr-tui.sock` (or under a `taria-<user>` folder in the temp directory). If that path is not usable, set `TARIA_SOCK` to another one for both programs.
+"taria layer disabled" means keybr-tui could not open its taria socket, which lets AI agents read the screen and drive the app; everything else works as usual. On Linux and macOS an agent connects with `taria-mcp --app keybr-tui`, which finds the socket at `$XDG_RUNTIME_DIR/taria/keybr-tui.sock` (or under a `taria-<user>` folder in the temp directory). If that path is not usable, set `TARIA_SOCK` to another one for both programs.
 
 ## How can I contribute?
 

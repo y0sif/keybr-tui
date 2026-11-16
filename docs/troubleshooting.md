@@ -50,7 +50,7 @@ Each entry gives the symptom, its cause and the fix. For anything else, see [Rep
 
 **Symptom**: You edited `config.toml` but settings did not change, or you cannot find the file at all.
 
-**Cause**: [Configuration](configuration.md#configtoml) gives the file's path on each OS and when keybr-tui writes it.
+**Cause**: The file does not exist until keybr-tui first saves a setting, a running keybr-tui rewrites it on its next save, and an invalid file is moved aside. [Configuration](configuration.md#configtoml) gives its path on each OS.
 
 **Fix**: Change any value on the Settings screen to create the file, quit, then edit it.
 

@@ -52,7 +52,7 @@ daily_goal_minutes = 15
 | `natural_words` | boolean | `true` | `true`: real words that fit your letters, with phonetic pseudo-words added when fewer than 15 fit. `false`: phonetic pseudo-words only |
 | `daily_goal_minutes` | integer | `30` | Minutes of practice per day for the dashboard's daily goal; `0` hides it |
 | `alphabet_size` | float | `0.0` | `0.0` to `1.0`: the share of the letters past the six starters to unlock ahead of time. Values outside the range are clamped |
-| `focus_letter` | string | unset | One letter of the practice alphabet, in either case. A locked letter is ignored, and in English the next save removes it |
+| `focus_letter` | string | unset | One letter of the practice alphabet, in either case. A locked letter is ignored |
 | `focus_pattern` | string | unset | One of the drills below. It wins over `focus_letter` |
 | `language` | string | `"en"` | A code from [Languages](../README.md#languages), or a language name. An unknown one falls back to English with a warning |
 

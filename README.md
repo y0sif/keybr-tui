@@ -84,8 +84,8 @@ keybr-tui [OPTIONS]
 | `--reset` | Delete the practice language's saved stats and start fresh |
 | `--data-dir` | Print the folder your stats are saved in and exit |
 | `--import <FILE>` | Import a keybr.com data export and exit (see below) |
-| `--force` | With `--import`, replace existing stats (a `.bak` backup is kept) |
-| `--layout <LAYOUT>` | With `--import`, the keybr.com layout family to import: a family (`colemak`), a layout id (`en-colemak`) or `all`; default: the family of your latest session |
+| `--force` | With `--import`, replace existing stats |
+| `--layout <LAYOUT>` | With `--import`, the keybr.com layout family to import (see below) |
 | `--language <CODE>` | Practice language: a code from [Languages](#languages) (default: `en`) or the language's name; saved to the config |
 | `--help` | Show help |
 | `--version` | Show version |
@@ -132,7 +132,7 @@ Switch the practice language with the Language row in Settings, or at launch wit
 
 ## Configuration
 
-keybr-tui needs no configuration: change settings on the Settings screen (main menu, **Settings**). Settings live in `config.toml`, which also holds a few options the screen does not show, such as the daily goal. [docs/configuration.md](docs/configuration.md) lists every setting, every key, and the file's path on each OS.
+keybr-tui needs no configuration: change settings on the Settings screen (main menu, **Settings**). Settings live in `config.toml`, which also holds a few options the screen does not show, such as the daily goal: see [docs/configuration.md](docs/configuration.md).
 
 ## Documentation
 
@@ -140,7 +140,7 @@ keybr-tui needs no configuration: change settings on the Settings screen (main m
 - [docs/comparison.md](docs/comparison.md): how keybr-tui compares to other typing trainers
 - [docs/faq.md](docs/faq.md): frequently asked questions
 - [docs/troubleshooting.md](docs/troubleshooting.md): common issues and fixes
-- [CONTRIBUTING.md](CONTRIBUTING.md): building from source, project layout, and the contribution workflow
+- [CONTRIBUTING.md](CONTRIBUTING.md): building from source and the contribution workflow
 
 ## Credits
 
