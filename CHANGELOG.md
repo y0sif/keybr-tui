@@ -9,9 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Agents using `taria-mcp` 0.4 get an answer to an input that changes nothing
-  within one frame (about 50 ms) instead of after 500 ms. keybr-tui now uses
-  `taria-ratatui` 0.4.
+- Agents using `taria-mcp` 0.4 get an answer within one frame to an input that
+  changes nothing. keybr-tui now uses `taria-ratatui` 0.4.
 - Launching no longer prints the taria socket path, which showed up after exit.
   If taria fails to start, that is still reported.
 
@@ -45,219 +44,167 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Turkish practice language (`--language tr` or `language = "tr"` in
   `config.toml`). It uses keybr.com's Turkish phonetic model, word list and
-  frequency-derived letter order, shows all 29 letters in the heatmap with
-  Turkish case rules (`i` → `İ`, `ı` → `I`), and keeps its stats in its own
-  `stats-tr.json`. `--import` replays the Turkish sessions of a keybr.com
-  export when Turkish is the practice language.
+  letter order, shows all 29 letters in the heatmap with Turkish case rules
+  (`i` → `İ`, `ı` → `I`), and keeps its stats in its own `stats-tr.json`.
+  `--import` replays the Turkish sessions of a keybr.com export when Turkish is
+  the practice language.
 - German practice language (`--language de` or `language = "de"` in
-  `config.toml`). It uses keybr.com's German phonetic model, word list
-  (without its capitalised words, which keybr.com's lessons never offer)
-  and frequency-derived letter order (starting `e n t i r l`), shows all 30
-  letters in the heatmap (`ß` as `ẞ`), and keeps its stats in its own
-  `stats-de.json`. `--import` replays the German sessions of a keybr.com
-  export when German is the practice language.
-- 24 more practice languages, for 27 in all: Armenian, Belarusian,
-  Croatian, Czech, Danish, Dutch, English (UK), Estonian, Finnish, French,
-  Greek, Hungarian, Italian, Latvian, Lithuanian, Norwegian Bokmål, Polish,
-  Portuguese, Romanian, Russian, Slovenian, Spanish, Swedish and Ukrainian.
-  Each uses keybr.com's phonetic model, word list and frequency-derived
-  letter order, and keeps its stats in its own `stats-<code>.json`.
-  `--language` takes the code (`fr`, `en-gb`) or the name in English or in
-  the language itself (`french`, `français`). English (UK) has the English
-  combination drills; the others have none. Greek tiles keep their accented
-  capitals (`Ά Έ Ή Ί Ό Ύ Ώ`) and show final sigma as `ς`, so every tile is
-  distinct (on keybr.com seven pairs look alike); Armenian `և` shows as
-  `ԵՎ`. keybr.com has no layouts of its own for English (UK) and Croatian,
-  and an export records only the layout, so `--import` finds no sessions
-  for them and says why.
+  `config.toml`). It uses keybr.com's German phonetic model, word list and
+  letter order (starting `e n t i r l`), shows all 30 letters in the heatmap
+  (`ß` as `ẞ`), and keeps its stats in its own `stats-de.json`. `--import`
+  replays the German sessions of a keybr.com export when German is the
+  practice language.
+- 24 more practice languages, for 27 in all: Armenian, Belarusian, Croatian,
+  Czech, Danish, Dutch, English (UK), Estonian, Finnish, French, Greek,
+  Hungarian, Italian, Latvian, Lithuanian, Norwegian Bokmål, Polish, Portuguese,
+  Romanian, Russian, Slovenian, Spanish, Swedish and Ukrainian. Each uses
+  keybr.com's data, keeps its stats in its own `stats-<code>.json`, and is
+  chosen with `--language` by code (`fr`, `en-gb`) or by name in English or in
+  the language itself (`french`, `français`). Greek tiles keep their accented
+  capitals and show final sigma as `ς`, so every tile is distinct, and Armenian
+  `և` shows as `ԵՎ`. Only English (UK) shares the English combination drills,
+  and `--import` finds no sessions for English (UK) or Croatian, which have no
+  keybr.com layouts of their own.
 - A Language row in Settings, the last row, cycling through the practice
-  languages by their own names (English, Türkçe, Deutsch, Français and so
-  on) with Left/Right. Switching takes effect at once, the same as
-  relaunching with `--language`: the current language's stats are saved,
-  the chosen language's own stats load (its unlocked letters, key speeds
-  and history), the next lesson is in that language, and `config.toml`
-  remembers the choice. `--import` and `--reset` still act on the language
-  from `--language` or `config.toml`.
+  languages by their own names (English, Türkçe, Deutsch, Français and so on)
+  with Left/Right. Switching takes effect at once, like relaunching with
+  `--language`: your stats are saved, the chosen language's own stats load,
+  the next lesson is in that language, and `config.toml` remembers the choice.
+  `--import` and `--reset` still act on the language from `--language` or
+  `config.toml`.
 - `--layout <LAYOUT>` for `--import`: the keybr.com layout family to import,
   given as a family (`colemak`), a layout id standing for its family
-  (`en-colemak`), or `all`. Sessions are matched to their language and
-  family with keybr.com's own layout table (98 layouts).
+  (`en-colemak`), or `all`. Sessions are matched to their language and family
+  with keybr.com's own layout table.
 
 ### Changed
 
-- The engine no longer assumes the alphabet is `a-z`: the transition table
-  reads its alphabet from the model file, the dictionary and word lengths are
-  UTF-8 aware, and the unlock order, heatmap and import filter come from the
-  practice language. English practice, files and generated text are
-  unchanged.
-- `--import` now imports one layout family, as keybr.com keeps key stats
-  per family: by default the family of your most recent session in the
-  practice language. If your export has sessions on several families (for
-  example QWERTY and Colemak, or Turkish Q and Turkish F, which are separate
-  families), only the latest family is imported; `--layout all` restores
-  merging them. The report names the family imported and the sessions
-  skipped.
+- English practice, its files and its generated text are unchanged by the new
+  languages.
+- `--import` now imports one layout family, as keybr.com keeps key stats per
+  family: by default the family of your most recent session in the practice
+  language. If your export has sessions on several families (QWERTY and
+  Colemak, or Turkish Q and Turkish F), only the latest is imported, and
+  `--layout all` merges them. The report names the family imported and the
+  sessions skipped.
 - Natural-words lessons skip 2-letter words and draw from the 1,000 most
   common words that fit your letters.
 
 ### Fixed
 
 - The key heatmap wraps onto balanced rows on narrow terminals instead of
-  being cut off on the right (one row needed 90 columns for English, and up
-  to 129 for Czech and Armenian).
+  being cut off on the right.
 - The Progress screen scrolls when its letter list is taller than the
-  terminal, instead of cutting off the letters past the bottom (English
-  needed 33 rows to show all 26). Up/Down, PageUp/PageDown, Home and End
-  move it; a line below the list then says how many letters are above and
-  below, and the footer shows `[Up/Down] Scroll`.
-- Early lessons in languages where few real words fit the first letters
-  used to cycle a handful of words (a fresh Greek profile read "τε εν ντε
-  ει ει εν ντε", a fresh Russian one "она нота тонна на антенна"). When
-  fewer than 15 real words fit, generated words now fill in, as on
-  keybr.com.
+  terminal, instead of cutting off the letters past the bottom. Up/Down,
+  PageUp/PageDown, Home and End move it, a line below the list says how many
+  letters are above and below, and the footer shows `[Up/Down] Scroll`.
+- Early lessons in languages where few real words fit the first letters no
+  longer cycle a handful of words. When fewer than 15 real words fit,
+  generated words fill in, as on keybr.com.
 
 ## [0.2.4] - 2026-09-29
 
 ### Fixed
 
-- The daily goal now rolls over at local midnight on Windows too (#11), and
-  `--import` credits keybr.com sessions to the local day there. The offset is
-  read from the active Windows time zone, including daylight saving time.
-- The crate builds on unix targets whose libc `struct tm` has no `tm_gmtoff`
-  (Solaris, illumos, AIX, VxWorks, QuRT and newlib targets) (#12). They fall
-  back to UTC day rollover. Not release targets, but `cargo install` works
-  there now.
+- The daily goal rolls over at local midnight on Windows too, and `--import`
+  credits keybr.com sessions to the local day there, daylight saving time
+  included ([#11](https://github.com/y0sif/keybr-tui/issues/11)).
+- `cargo install` works on Solaris, illumos, AIX, VxWorks, QuRT and newlib
+  targets ([#12](https://github.com/y0sif/keybr-tui/issues/12)). There the
+  daily goal rolls over at UTC midnight.
 
 ## [0.2.3] - 2026-09-29
 
 ### Added
 
-- taria integration: the app binds a [taria](https://github.com/y0sif/taria)
-  socket and publishes a semantic tree for the menu, typing, progress, and
-  settings screens, so terminal agents can read and drive the app. Semantic
-  acts and the raw-key fallback both lower into the existing key handler, so
-  agents cannot reach states a keyboard cannot, and a bind failure falls back
-  to running taria-free. Depends on the published `taria-ratatui` 0.2 crate.
+- taria integration: the app publishes its menu, typing, progress and settings
+  screens over a [taria](https://github.com/y0sif/taria) socket, so terminal
+  agents can read and drive it. Agent input goes through the same key handling
+  as the keyboard, so an agent cannot reach a state a keyboard cannot. If the
+  socket cannot be bound, the app runs without taria. The integration works on
+  Linux and macOS; Windows builds have the same screens, keys and files with no
+  agent surface.
 - Typed text (taria's `type_text`) is scored as keystrokes against the current
-  lesson instead of being lowered through the key handler. This app binds bare
-  letters as commands on every screen, so lowered text would have met them:
-  `type_text("quick")` on the menu would have quit the app at its first
-  character and reported success. Text sent while no lesson is running is
-  acknowledged `Ignored`, control characters in the payload are skipped rather
-  than lowered (a tab is the typing screen's error-mode toggle), and one call
-  types at most one lesson, because finishing one immediately generates the
-  next.
-- Agent input the app deliberately does nothing with is now acknowledged
-  `Ignored` (an act on the wrong screen, an unknown node id, an action a row
-  does not advertise, an unparseable key), so an agent waiting on an effect
-  stops waiting instead of timing out.
-- The typing screen publishes three dashboard rows that were previously
-  invisible to agents: the all-keys confidence heatmap (a `chart`, whose
-  meaning was carried entirely by colour), the daily-goal bar (a
-  `progress_bar`), and the "letter unlocked!" callout (a `status`, which
-  clears itself and so could vanish between two reads).
-- Agent traffic that went nowhere is reported on stderr after the terminal is
-  restored: dropped, stale and unreadable inputs, and answers the bridge was
-  too slow to read.
-- The taria integration is unix-only: Linux and macOS. taria's transport is a
-  unix domain socket (`std::os::unix::net`), so `taria-ratatui` does not
-  compile for Windows at all. It is declared under
-  `[target.'cfg(unix)'.dependencies]` and every touch point in the app is
-  gated `#[cfg(unix)]`, including the semantic tree module. Windows builds are
-  taria-free: same screens, same keys, same files, with no agent surface. The
-  ratatui 0.30.2 migration below still applies to them.
-- Combination drills (#9, the second half of #7): a "Focus pattern" row in Settings
-  pins one of 16 preset drills, 8 bigram reaches (`cr`, `pl`, `br`, `tr`, `gr`, `fr`,
-  `bl`, `cl`) and 8 word endings (`-ing`, `-ed`, `-er`, `-ly`, `-tion`, `-ment`,
-  `-able`, `-ous`), so every generated word matches the whole pattern instead of just
-  containing one letter. Left/Right cycles Off plus whichever presets the embedded
-  dictionary can currently fill with your unlocked letters, meaning at least 8 distinct
-  real words, enough for a lesson rather than one word repeated. The row therefore opens
-  empty and reads "None yet" on a fresh profile, offers its first drill (`-ER`) once your
-  seventh letter unlocks, and has all 16 by 21 letters: combination drills are for a
-  profile past the basics. Drills draw from the embedded word list even with `natural_words` off,
-  since a pattern has nothing to drill without real words. Picking a pattern clears
-  any letter pin and vice versa, since the two share one focus slot. The pin persists
-  in `config.toml` as a new `focus_pattern` key; `focus_letter` is unchanged.
+  lesson, so it never triggers a menu command. Text sent while no lesson is
+  running is acknowledged `Ignored`, control characters in it are skipped, and
+  one call types at most one lesson.
+- Agent input the app does nothing with (an act on the wrong screen, an
+  unknown node id, an action a row does not advertise, an unparseable key) is
+  acknowledged `Ignored`, so an agent waiting on an effect stops waiting.
+- Agents can read the typing screen's key heatmap (a `chart`), daily-goal bar
+  (a `progress_bar`) and "letter unlocked!" callout (a `status`).
+- Agent traffic that went nowhere is reported on stderr after exit: dropped,
+  stale and unreadable inputs, and answers the bridge was too slow to read.
+- Combination drills ([#9](https://github.com/y0sif/keybr-tui/issues/9)): a
+  "Focus pattern" row in Settings pins one of 16 preset drills, 8 bigram
+  reaches (`cr`, `pl`, `br`, `tr`, `gr`, `fr`, `bl`, `cl`) and 8 word endings
+  (`-ing`, `-ed`, `-er`, `-ly`, `-tion`, `-ment`, `-able`, `-ous`), so every
+  generated word matches the whole pattern. Left/Right cycles Off plus the
+  presets your unlocked letters can fill with at least 8 real words: the row
+  reads "None yet" on a fresh profile, offers `-ER` once your seventh letter
+  unlocks, and has all 16 by 21 letters. Drills use real words even with
+  `natural_words` off. A pattern and a letter pin share one focus slot, so
+  picking one clears the other, and the pattern is saved as `focus_pattern` in
+  `config.toml`.
 
 ### Changed
 
-- Migrated from ratatui 0.29 to 0.30.2 (dropping the direct crossterm
-  dependency).
+- Migrated from ratatui 0.29 to 0.30.2.
 - MSRV raised from 1.75 to 1.88.
 
 ### Fixed
 
-- Daily goal now rolls over at local midnight instead of UTC midnight. Previously an
-  evening session west of UTC was stamped with tomorrow's date, so the goal bar started
-  the next morning already (partly) full. The local offset comes from `libc::localtime_r`.
-  libc is a new dependency, declared under `[target.'cfg(unix)'.dependencies]`, because crossterm
-  declares its own libc as optional and unix-gated, so it is not a dependency crossterm
-  supplies on every target.
-- `--import` now credits a keybr.com session to the local day it actually happened on.
-  Export timestamps are UTC, so matching them against the (now local) date string dropped
-  practice seconds from `today_seconds_practiced` for anyone not on UTC: an early-morning
-  session east of UTC, or an evening one west of it. The import instead compares
-  each timestamp against the UTC window `[local midnight, local midnight + 24h)`.
-- Both of the above apply to Linux and macOS only. On Windows nothing changes: the local
-  offset is read through `localtime_r`, which the Windows build does not use, so it falls
-  back to UTC. The daily goal there still rolls over at UTC midnight and `--import` still
-  credits sessions to the UTC day, exactly as before.
+- On Linux and macOS, the daily goal rolls over at local midnight instead of
+  UTC midnight. An evening session west of UTC no longer counts toward the
+  next day's goal.
+- On Linux and macOS, `--import` credits each keybr.com session to the local
+  day it happened on.
 
 ## [0.2.2] - 2026-07-23
 
 ### Added
 
-- Manual letter focus (#7): a "Focus letter" row in Settings pins one unlocked letter
-  so every generated word contains it, overriding the automatic weakest-key focus.
-  Left/Right cycles Auto plus the currently unlocked letters. The pin persists in
-  `config.toml` as `focus_letter` (lowercased and validated against unlocked letters
-  at load, falling back to Auto if invalid), and the pinned key renders reversed in
-  the key heatmap to distinguish it from the automatic focus.
+- Manual letter focus ([#7](https://github.com/y0sif/keybr-tui/issues/7)): a
+  "Focus letter" row in Settings pins one unlocked letter so every generated
+  word contains it, overriding the automatic weakest-key focus. Left/Right
+  cycles Auto plus the unlocked letters. The pin is saved in `config.toml` as
+  `focus_letter`, and the pinned key shows reversed in the key heatmap.
 
 ## [0.2.1] - 2026-06-22
 
-### Changed
-
-- Rewrote the README with its own identity instead of mirroring sibling projects:
-  a tighter intro, a "How it adapts" section leading with the adaptive engine,
-  collapsible install methods, and a full config-option reference. Development and
-  project-layout notes moved to `CONTRIBUTING.md`.
-- Keyword-dense crate metadata (`description`, `keywords`, `homepage`) for crates.io
-  and search discoverability.
-
 ### Added
 
-- SEO landing page at <https://y0sif.github.io/keybr-tui/> with structured data
-  (`SoftwareApplication` and `FAQPage`), a sitemap, and Google Search Console
-  verification.
+- A landing page at <https://y0sif.github.io/keybr-tui/>.
+
+### Changed
+
+- Rewrote the README: a tighter intro, a "How it adapts" section leading with
+  the adaptive engine, collapsible install methods, and a full config-option
+  reference. Development and project-layout notes moved to `CONTRIBUTING.md`.
 
 ## [0.2.0] - 2026-06-12
 
 ### Added
 
-- Import your keybr.com practice history: `keybr-tui --import typing-data.json` replays
-  the full export through keybr's own algorithm (per-key EMA over session means,
-  historical-best tracking, validity filtering) and reconstructs your unlocked letters,
-  per-key speeds, and focus letter so you can continue in the terminal where the website
-  left off. `--force` replaces existing stats and always writes a `stats.json.bak` backup.
-- The import summary states which target speed the unlock derivation used, since the
-  unlocked set is re-derived against the current target (just like keybr.com).
-- `alphabet_size` setting (Settings screen + config.toml), mirroring keybr.com's
-  alphabetSize: force-include up to 20 extra letters beyond the starter six, regardless
-  of confidence. Defaults to 0 (pure earn-by-confidence progression).
+- Import your keybr.com practice history: `keybr-tui --import typing-data.json`
+  replays the full export through keybr.com's own algorithm and reconstructs
+  your unlocked letters, per-key speeds and focus letter, so you can continue
+  in the terminal where the website left off. `--force` replaces existing stats
+  and always writes a `stats.json.bak` backup.
+- The import summary names the target speed used to work out your unlocked
+  letters, which are re-derived against the current target, as on keybr.com.
+- `alphabet_size` setting (Settings screen and `config.toml`), as on keybr.com:
+  force-include up to 20 extra letters beyond the starter six, regardless of
+  confidence. Defaults to 0 (letters are earned by confidence alone).
 
 ### Fixed
 
-- Per-key smoothing now matches keybr.com exactly: the exponential moving average is
-  applied once per lesson to each key's mean latency, not on every keystroke (which
-  adapted roughly 10x too fast).
-- Focus-key selection now matches keybr.com: the weakest active key (lowest historical-best
-  confidence below target) is boosted, instead of the first below-target key in unlock
-  order — and once every active key is learned there is no boosted key at all.
-- Running `cargo test` no longer overwrites your real config and stats: the update layer
-  only raises save flags now, and the main event loop is the single place user files are
-  written.
+- Per-key smoothing matches keybr.com: it is applied once per lesson to each
+  key's mean speed, not on every keystroke, which adapted too fast.
+- Focus-key selection matches keybr.com: the weakest active key is boosted,
+  instead of the first below-target key in unlock order. Once every active key
+  is learned, no key is boosted.
+- Running `cargo test` no longer overwrites your real config and stats.
 
 ## [0.1.0] - 2026-03-29
 
@@ -268,8 +215,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Progressive letter unlocking based on performance against target speed
 - Focus key system that biases text generation toward your weakest letter
 - Backspace support with two error modes: forgive mistakes and stop on error
-- Real-time WPM and accuracy display during typing sessions
-- Lesson summary screen showing WPM, accuracy, newly unlocked letters, and weakest keys
+- Dashboard above each lesson with the last lesson's WPM and accuracy, a key heatmap, the focus key and a daily goal; a finished lesson rolls straight into the next
 - Main menu with navigation to typing practice, progress view, and settings
 - Progress view displaying per-key statistics (speed, confidence, attempts, errors)
 - Settings screen for adjusting target WPM, error mode, and fragment length

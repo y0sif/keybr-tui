@@ -4,7 +4,8 @@ Licensed under the GNU Affero General Public License v3.0 only. See LICENSE.
 
 keybr-tui includes and adapts material from keybr.com
 (https://github.com/aradzie/keybr.com) by aradzie, licensed under the
-GNU AGPLv3. data/README.md lists each file and where it comes from.
+GNU AGPLv3. https://github.com/y0sif/keybr-tui/blob/main/data/README.md
+lists each file and where it comes from.
 
 Code contributed up to and including release 0.3.0 was contributed under
 the MIT License. Its original notice is reproduced below, as that license
