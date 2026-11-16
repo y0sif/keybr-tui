@@ -54,7 +54,7 @@ matching() {
 #    other internal names.
 while IFS= read -r -d '' f; do
   report "$f" 1 ignored-tracked "tracked but ignored by .gitignore; untrack it (git rm --cached)"
-done < <(git ls-files -z -ci --exclude-standard)
+done < <(git ls-files -z -ci --exclude-per-directory=.gitignore)
 
 # 2. Markdown lives only at these paths, spelled `.md`. Specs, plans, notes and other internal
 #    files go under .claude/ (ignored), never in the repo.
@@ -125,7 +125,7 @@ grep_docs provenance -iE "$provenance"
 # Versions are this project's own (0.x): "before 1.88.0" names a Rust release. "Older versions"
 # only of keybr-tui: an older terminal is a fact for the user.
 history='\b(since|until|in|see|fixes|fixed|closes|issue|pr) #[0-9]+|\(#[0-9]+\)|/(issues|pull)/[0-9]+'
-history+='|\b(since|until|as of|as in|before) v?0\.[0-9]+\.[0-9]+|\b(this|it) used to\b'
+history+='|\b(since|until|as of|as in|before|in|from|after) v?0\.[0-9]+\.[0-9]+|\b(this|it) used to\b'
 history+='|\bolder versions? of keybr-tui\b|\ban older keybr-tui\b'
 grep_docs history -iE "$history"
 

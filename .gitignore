@@ -10,8 +10,9 @@ CLAUDE.local.md
 graphify-out/
 
 # Internal files: specs, plans, notes, benchmarks, handoffs
-/specs/
+specs/
 /bench/
+/benchmarks/
 /results/
 /memory/
 NOTES.md
@@ -21,6 +22,9 @@ TASKS.md
 REVIEW.md
 RESULTS.md
 BENCHMARKS.md
+BENCHMARK.md
+CODE_REVIEW.md
+TESTING-QUEUE.md
 HANDOFF.md
 MEMORY.md
 next-session*.md

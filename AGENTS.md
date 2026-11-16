@@ -65,7 +65,7 @@ macOS and Windows. Rules:
 - Unix only: taria (`tree.rs`, `update/agent.rs`, the `taria-ratatui` dependency) and `libc`
   are `cfg(unix)`. Gate every new touch point the same way. Check the Windows build with
   `cargo clippy --all-targets --target x86_64-pc-windows-gnu -- -D warnings`.
-- User files: the stats files and config.toml are written only through
+- User files: the stats files and config.toml are saved only through
   `persistence::write_atomic` and read only through `read_user_file` (`persistence/files.rs`).
   In the TUI every save is queued on `persistence::Saver`. A test that touches the disk uses
   `persistence::test_support::TestDir`, never the real config or data directory.

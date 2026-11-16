@@ -200,7 +200,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Per-key smoothing matches keybr.com: it is applied once per lesson to each
-  key's mean speed, not on every keystroke, which adapted too fast.
+  key's mean time, not on every keystroke, which adapted too fast.
 - Focus-key selection matches keybr.com: the weakest active key is boosted,
   instead of the first below-target key in unlock order. Once every active key
   is learned, no key is boosted.
