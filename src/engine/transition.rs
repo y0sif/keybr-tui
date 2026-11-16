@@ -4,12 +4,10 @@
 //! (`packages/keybr-phonetic-model/lib/transitiontable.ts`).
 //!
 //! Each language embeds one binary model from keybr.com
-//! (`data/model-<code>.data`, see [`Language::model_bytes`]); `model-en.data`
-//! is the phonetic transition table trained on English text. Compared to the previous
-//! 27×27 bigram model, this order-4 chain conditions each character on
-//! the previous three characters, which dramatically reduces gibberish
-//! at filter boundaries (e.g. the bigram model produced "ata ete tat";
-//! the order-4 model produces shapes like "ente", "ation", "tio").
+//! (`data/model-<code>.data`, see [`Language::model_bytes`]), trained on
+//! that language's text. The order-4 chain conditions each character on
+//! the previous three, so words at filter boundaries keep shapes like
+//! "ente", "ation", "tio".
 //!
 //! The file format and its checked reader are in [`super::model`].
 //!
@@ -54,7 +52,7 @@ impl TransitionTable {
     /// Decode the embedded model for `language`.
     ///
     /// Panics with a descriptive message if the binary asset is missing
-    /// or malformed — this is a build-time/asset failure and not
+    /// or malformed: this is a build-time/asset failure and not
     /// something the runtime should attempt to recover from.
     pub fn for_language(language: Language) -> Self {
         Self::from_bytes(language.model_bytes())
@@ -145,8 +143,8 @@ impl TransitionTable {
     }
 
     /// Look up the frequency distribution for the next character given
-    /// the last `order - 1` characters of history (in chronological order
-    /// — oldest first).
+    /// the last `order - 1` characters of history (in chronological order,
+    /// oldest first).
     ///
     /// Returns an `alphabet_size`-byte slice indexed by next-character
     /// alphabet index.
@@ -302,7 +300,7 @@ mod tests {
         // For order=4, history is 3 chars: oldest, middle, newest.
         // Take a likely-frequent prefix " th" (space, t, h) and
         // confirm the segment is non-empty and that 'e' is the most
-        // likely follow-up (forming "the" — the most common English word).
+        // likely follow-up (forming "the", the most common English word).
         let history = [
             table.char_to_idx(' ').unwrap(),
             table.char_to_idx('t').unwrap(),

@@ -1,3 +1,7 @@
+//! The Model of the MVU split: [`App`] holds all of the app's runtime
+//! state. This file defines it and its constructors; `focus`, `lesson` and
+//! `profile` hold the rest of its methods. The views only read it.
+
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
@@ -66,7 +70,7 @@ pub struct App {
     // --- Last lesson's results (shown in stats bar during next lesson) ---
     pub last_lesson: Option<LessonResult>,
     /// Rolling in-memory history of completed lessons (capped).
-    /// Not persisted — used only to compute deltas vs running average
+    /// Not persisted: used only to compute deltas vs running average
     /// in the dashboard. Older entries fall off the front.
     pub lesson_history: Vec<LessonResult>,
 
@@ -243,7 +247,7 @@ impl App {
 
             // Restore lesson stats so the dashboard's Metrics row shows
             // the previous session's numbers (and deltas) on launch.
-            // `newly_unlocked` is intentionally not persisted — the
+            // `newly_unlocked` is intentionally not persisted: the
             // unlock callout is a one-time celebration, not state.
             last_lesson = saved.last_lesson.map(|r| LessonResult {
                 wpm: r.wpm,

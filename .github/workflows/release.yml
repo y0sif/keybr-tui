@@ -68,8 +68,8 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
-      # Release notes are written by hand from CHANGELOG.md (see CLAUDE.md
-      # "Releasing a New Version") — auto-generated notes miss stacked PRs.
+      # No generated notes: the release notes are written by hand from the
+      # version's CHANGELOG.md section after this job creates the release.
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:

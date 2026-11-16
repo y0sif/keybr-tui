@@ -1,3 +1,10 @@
+//! Entry point: parses the CLI, loads config.toml and the stats, and runs
+//! the event loop (draw, `update`, then flush the saves it requested).
+//! Every save in the TUI goes through `persistence::Saver`. On quit `main`
+//! waits for the last saves and prints their failures once the terminal is
+//! restored; a panic hook waits up to 2 s for them, because the release
+//! profile aborts on panic.
+
 mod app;
 mod components;
 mod config;

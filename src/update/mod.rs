@@ -1,3 +1,8 @@
+//! The Update of the MVU split: [`update`] applies one event to the
+//! [`App`], with one file per screen, plus `agent` for taria input (unix
+//! only). Nothing here renders or touches the disk: a save or a language
+//! switch is a request on `App` that main's loop carries out.
+
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::{App, AppScreen};
@@ -23,7 +28,7 @@ use progress::handle_progress_key;
 use settings::handle_settings_key;
 use typing::handle_typing_key;
 
-/// Request a stats save. `update` never touches the disk itself — main's
+/// Request a stats save. `update` never touches the disk itself: main's
 /// event loop queues the actual write after the event is processed.
 /// This keeps the MVU update layer pure and, crucially, stops unit tests
 /// that drive `update` from clobbering the user's real stats file.

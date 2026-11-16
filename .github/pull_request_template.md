@@ -16,15 +16,13 @@
 
 ## How was this tested?
 
-<!-- Describe your test plan. If this adds new tests, note where they live (e.g. `src/metrics/` unit tests, `tests/` integration tests). -->
+<!-- Describe your test plan. Tests are `#[cfg(test)]` modules beside the code, plus `src/golden_tests.rs`. -->
 
 ## Pre-merge checklist
 
-- [ ] `cargo fmt --all -- --check` passes locally
-- [ ] `cargo clippy --all-targets -- -D warnings` passes locally
-- [ ] `cargo test` passes locally
+- [ ] The [checks in CONTRIBUTING.md](https://github.com/y0sif/keybr-tui/blob/main/CONTRIBUTING.md#checks) pass locally
 - [ ] Updated CHANGELOG.md if user-facing
-- [ ] Updated docs/ if architecture or behavior changed
+- [ ] Updated README.md or docs/ if user-visible behavior changed
 - [ ] No new external dependencies added without justification
 
 ## Screenshots / asciinema (UI changes)
