@@ -14,7 +14,7 @@ Yes: download your data from your keybr.com profile and run `keybr-tui --import 
 
 ## Does keybr-tui work offline?
 
-Yes. keybr-tui never makes a network request: its word lists and phonetic models ship inside the binary, and all stats are written to local files.
+keybr-tui never makes a network request: its word lists and phonetic models ship inside the binary, and all stats are written to local files.
 
 ## Where is my progress saved?
 
@@ -22,7 +22,7 @@ Run `keybr-tui --data-dir` to print the folder that holds your stats. Each langu
 
 ## Can I reset my stats?
 
-Yes. `keybr-tui --reset` deletes the stats file of your practice language only, keeping your config and the other languages' stats, and then opens the app on a fresh profile. To clear the stats of every language, delete the `stats*.json` files in the folder `keybr-tui --data-dir` prints.
+`keybr-tui --reset` deletes the stats file of your practice language only, keeping your config and the other languages' stats, and then opens the app on a fresh profile. To clear the stats of every language, delete the `stats*.json` files in the folder `keybr-tui --data-dir` prints.
 
 ## What terminal emulators are supported?
 
@@ -46,7 +46,7 @@ In Forgive Mistakes mode (`forgive-mistakes` in config.toml), a wrong key is mar
 
 ## Can I use a Dvorak or Colemak layout?
 
-Yes. keybr-tui reads whatever character your OS sends, so any keyboard layout works. The unlock order comes from the practice language's letter frequencies, as on keybr.com by default. When importing, `--layout` picks which layout family's sessions to replay.
+keybr-tui reads whatever character your OS sends, so any keyboard layout works. The unlock order comes from the practice language's letter frequencies, as on keybr.com by default. When importing, `--layout` picks which layout family's sessions to replay.
 
 ## Does it support languages other than English?
 
