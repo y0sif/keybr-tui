@@ -11,9 +11,11 @@
 
 # keybr-tui
 
-[![CI](https://github.com/y0sif/keybr-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/y0sif/keybr-tui/actions/workflows/ci.yml) [![Crates.io](https://img.shields.io/crates/v/keybr-tui.svg)](https://crates.io/crates/keybr-tui) [![docs.rs](https://img.shields.io/docsrs/keybr-tui)](https://docs.rs/keybr-tui) [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE) [![MSRV](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
+[![CI](https://github.com/y0sif/keybr-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/y0sif/keybr-tui/actions/workflows/ci.yml) [![Crates.io](https://img.shields.io/crates/v/keybr-tui.svg)](https://crates.io/crates/keybr-tui) [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE) [![MSRV](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
 
-**Adaptive touch-typing practice for the terminal.** keybr-tui times every key you press, finds the ones slowing you down, and builds drills aimed straight at them. It is a faithful port of the [keybr.com](https://www.keybr.com) learning algorithm, runs entirely offline, and can [import your keybr.com history](#bring-your-keybrcom-history).
+**Adaptive TUI typing trainer in Rust, bringing keybr.com's algorithm to your terminal. Offline touch-typing practice that imports your keybr.com data export.**
+
+keybr-tui times every key you press, finds the ones that slow you down, and builds lessons around them. Already practicing on keybr.com? [Bring your keybr.com history](#bring-your-keybrcom-history) and continue where you left off.
 
 <p align="center"><img src="assets/demo.gif" alt="keybr-tui demo: a typing lesson in the terminal, then per-lesson speed and accuracy, the per-key heatmap and a new letter unlocking, and the per-key progress screen" width="900"></p>
 
@@ -23,54 +25,47 @@
 curl -sSf https://y0sif.github.io/keybr-tui/install.sh | sh
 ```
 
-The script installs the latest prebuilt binary for your platform. Prefer Cargo? Run `cargo install keybr-tui`.
+The script installs the latest release on Linux (x86_64) and macOS (Intel and Apple Silicon), into `/usr/local/bin` when it is writable and `~/.local/bin` otherwise. On Windows, use Cargo or the prebuilt zip below.
 
 <details>
-<summary>Other ways to install (prebuilt binary, from source)</summary>
+<summary>Other ways to install: Cargo, prebuilt binaries, Nix, from source</summary>
 
-**Prebuilt binary.** Every [release](https://github.com/y0sif/keybr-tui/releases) ships binaries for Linux (x86_64), macOS (Intel and Apple Silicon), and Windows (x86_64). Unix archives are `.tar.gz`, Windows is `.zip`.
+**Cargo:** `cargo install keybr-tui --locked`
+
+**Prebuilt binaries:** every [release](https://github.com/y0sif/keybr-tui/releases) has archives for Linux x86_64, macOS (Intel and Apple Silicon) and Windows x86_64 (`.zip`). Extract one and run `keybr-tui`.
+
+**Nix:** `nix run github:y0sif/keybr-tui`, or `nix profile install github:y0sif/keybr-tui` to keep it.
+
+**From source:** clone the repository, then run `cargo install --path . --locked` inside it.
+
+**A specific version:** put `KEYBR_TUI_VERSION` with a tag from the releases page before `sh`:
 
 ```bash
-tar -xzf keybr-tui-x86_64-unknown-linux-gnu.tar.gz
-./keybr-tui
+curl -sSf https://y0sif.github.io/keybr-tui/install.sh | KEYBR_TUI_VERSION=vX.Y.Z sh
 ```
-
-**From source.**
-
-```bash
-git clone https://github.com/y0sif/keybr-tui.git
-cd keybr-tui
-cargo install --path .
-```
-
-Pin a version for the install script with `KEYBR_TUI_VERSION=v0.2.0`.
 
 </details>
 
 ## How it adapts
 
-Every session feeds a per-key model of how fast and accurately you type. keybr-tui reads that model to decide what you practice next.
+keybr-tui keeps a per-key model of your speed and accuracy and uses it to decide what you practice next.
 
-1. **Start small.** You begin with a handful of letters, not the whole keyboard.
-2. **Earn the rest.** A new letter unlocks only once your active set reaches a confidence threshold, measured against your target speed.
-3. **Drill the weak spot.** The slowest key in your active set becomes the focus key and shows up more often in the text you are given. You can pin this yourself in Settings too, either to one letter or to one of 16 preset combination drills (bigram reaches like `cr`, word endings like `-tion`), which appear once your unlocked letters can spell enough real words to fill a lesson. A fresh profile reaches none of them; the first arrives with your seventh letter and the last by your twenty-first.
-4. **Read like words.** A phonetic Markov chain builds pronounceable pseudo-words from your active letters, so practice never feels like random noise.
-5. **Learn from each key.** Every keystroke's reaction time updates a smoothed per-key average, the same calculation keybr.com runs.
-
-Because the engine is a faithful port of the [keybr.com](https://github.com/aradzie/keybr.com) algorithm, the practice you get in the terminal matches what the website would give you.
+1. **Start small.** You begin with six letters, not the whole keyboard.
+2. **Earn the rest.** A new letter unlocks once every letter you have reaches your target speed.
+3. **Drill the weak spot.** Your slowest letter becomes the focus key and appears in every word. You can pin a letter yourself, or in English a combination drill such as `cr` or `-tion`, in [Settings](docs/configuration.md#settings-screen).
+4. **Practice real words.** Lessons use real words of your language that fit your letters, with pronounceable pseudo-words from keybr.com's phonetic model filling in when too few fit.
+5. **Learn from each lesson.** When a lesson ends, each key's average time in it updates that key's smoothed speed, the same calculation keybr.com runs.
 
 ## Features
 
 | Feature | What you get |
 |---|---|
-| **Adaptive drills** | Phonetic Markov text built from your active letters, biased toward your weakest key |
-| **Per-key tracking** | Reaction times smoothed into a confidence score for every key |
-| **Progressive unlock** | Letters open up as you prove proficiency, in keybr.com's frequency order |
-| **keybr.com import** | Bring your full learning state over from a keybr.com data export |
+| **keybr.com import** | Your unlocked letters and key speeds from a keybr.com data export |
+| **27 languages** | keybr.com's word list, phonetic model and letter order for each |
+| **Live dashboard** | Last lesson's speed and accuracy, a per-key heatmap and a daily goal above the text |
+| **Progress screen** | Speed, best, attempts, errors and status for every letter |
 | **Two error modes** | Forgive mistakes and keep moving, or stop until you correct them |
-| **Lesson summary** | WPM, accuracy, and your weakest keys after every round |
 | **Local and offline** | No account, no network, stats saved as plain local files |
-| **Terminal-native** | Minimal ratatui interface in ANSI colors, no chrome in the way |
 
 ## Usage
 
@@ -81,9 +76,9 @@ keybr-tui [OPTIONS]
 | Flag | Description |
 |------|-------------|
 | `--target-wpm <N>` | Target typing speed in words per minute (default: 35) |
-| `--error-mode <MODE>` | `move-on` (default) or `stop-on-error` |
+| `--error-mode <MODE>` | `stop-on-error` (or `stop`) holds the cursor on a mistake; `move-on` forgives it |
 | `--reset` | Delete the practice language's saved stats and start fresh |
-| `--data-dir` | Print the data directory path and exit |
+| `--data-dir` | Print the folder your stats are saved in and exit |
 | `--import <FILE>` | Import a keybr.com data export and exit (see below) |
 | `--force` | With `--import`, replace existing stats (a `.bak` backup is kept) |
 | `--layout <LAYOUT>` | With `--import`, the keybr.com layout family to import: a family (`colemak`), a layout id (`en-colemak`) or `all`; default: the family of your latest session |
@@ -91,31 +86,33 @@ keybr-tui [OPTIONS]
 | `--help` | Show help |
 | `--version` | Show version |
 
-**In-session keys:** `Esc` returns to the menu or quits, `Enter` selects a menu item or dismisses the lesson summary, the arrow keys navigate menus and settings and scroll a Progress list too long for the window (`PageUp`/`PageDown`, `Home`/`End` too), and `Left`/`Right` adjust setting values.
+| Screen | Keys |
+|---|---|
+| Menu | `Up`/`Down` move, `Enter` selects, `q` or `Esc` quits |
+| Typing | `Esc` returns to the menu, `Tab` switches the error mode, `Backspace` steps back one character and clears its mistake |
+| Progress | `Up`/`Down`, `PageUp`/`PageDown` and `Home`/`End` scroll; `Esc` returns to the menu |
+| Settings | `Up`/`Down` pick a row, `Left`/`Right` change it; `Esc` returns to the menu |
+
+`Ctrl+C` quits from any screen. A finished lesson rolls straight into the next one.
 
 ## Bring your keybr.com history
 
-Already practicing on [keybr.com](https://www.keybr.com)? Carry your progress over and continue in the terminal.
+keybr-tui imports a keybr.com data export and continues from the same learning state. On keybr.com, open your profile and click **Download data** to get `typing-data.json`, then run:
 
-1. On keybr.com, open your profile and click **Download data**. You get a `typing-data.json` file with your full practice history.
-2. Import it:
+```bash
+keybr-tui --import typing-data.json
+```
 
-   ```bash
-   keybr-tui --import typing-data.json
-   ```
+The import replays your sessions the way keybr.com does, so your unlocked letters, key speeds and focus letter match the website. It takes the sessions of your practice language (`--language` picks another) in one layout family, by default the family of your latest session.
 
-The importer replays the sessions of your practice language and layout family (see below) through the same per-key smoothing keybr.com uses, so your unlocked letters, per-key speeds, and focus letter come out exactly as the website computed them.
-
-A few details worth knowing:
-
-- Your target speed is not part of the export. If you use a non-default target on keybr.com, pass `--target-wpm <N>` alongside `--import`, since the unlocked set is derived against it. With no flag, the target saved in your config is used.
-- Only sessions on the practice language's layouts, by keybr.com's layout table, are imported: `keybr-tui --language tr --import typing-data.json` takes the Turkish (`tr-tr-q`, `tr-tr-f`) sessions, a plain `--import` those of your saved practice language (English by default). keybr.com has no layouts of its own for English (UK) or Croatian (keybr.com's `en-uk` layout counts as English), and an export records only the layout, so an `en-gb` or `hr` import finds no sessions and the error says why.
-- keybr.com keeps separate key stats for each layout family, a group of layouts it treats as one (US and UK QWERTY are both `qwerty`, while `dvorak`, `colemak` and `colemak-dh` are each their own), so the importer takes one family: by default, the family of your most recent session in the practice language. Pick another with `--layout colemak` (a family) or `--layout en-colemak` (a layout id as stored in the export, standing for its family), or merge every family into one set of key stats with `--layout all`. The report names the family it imported and counts the sessions it skipped. A `--layout` family with no layouts of the practice language imports nothing, and the error names which of keybr-tui's languages it belongs to. Turkish Q (family `qwerty`) and Turkish F (family `tr-tr-f`) are separate families, so a mixed Turkish export imports only the latest of the two unless you pass `--layout all`.
-- Existing local stats are never overwritten unless you pass `--force`, which still writes a `.bak` backup of that language's stats file first.
+- `--layout colemak` imports another family, and `--layout all` merges every family into one set of key stats.
+- The export does not record your target speed. If yours on keybr.com differs from the one in your config, pass it with `--target-wpm <N>`, since unlocks depend on it.
+- Existing stats are kept unless you pass `--force`, which saves a `.bak` copy first.
+- English (UK) and Croatian cannot be imported: keybr.com records their sessions under another language's layouts.
 
 ## Languages
 
-keybr-tui teaches 27 languages. Each uses keybr.com's own data for that language: its phonetic model, its word list, and its letter order (Turkish starts from `a e i n ı r`, German from `e n t i r l`).
+keybr-tui teaches 27 languages, each with keybr.com's own word list, phonetic model and letter order.
 
 | Code | Language | Code | Language | Code | Language |
 |---|---|---|---|---|---|
@@ -129,49 +126,15 @@ keybr-tui teaches 27 languages. Each uses keybr.com's own data for that language
 | `es` | Spanish (Español) | `lv` | Latvian (Latviešu) | `tr` | Turkish (Türkçe) |
 | `et` | Estonian (Eesti) | `nb` | Norwegian Bokmål (Norsk bokmål) | `uk` | Ukrainian (Українська) |
 
-The heatmap shows the language's whole alphabet, one tile per letter. Turkish dotted and dotless i are separate keys (`İ` and `I`), German `ß` shows as `ẞ` and Armenian `և` as `ԵՎ`. Greek tiles keep their accents (`Ά`, `Έ`) and show final sigma as `ς`, so every tile is distinct; keybr.com drops most of those accents and shows `ς` as `Σ`. keybr.com leaves `ß` out of its lessons on the Swiss German layout (`de-ch` has no ß key), while keybr-tui always teaches all 30 German letters.
-
-Switch languages in Settings: the last row, Language, cycles through them with `Left`/`Right`, showing each by its own name (the one in parentheses, or `English` and `English (UK)`). The switch is immediate and works like relaunching with `--language`: your current stats are saved, the chosen language's own stats load (its unlocked letters, key speeds and history), the next lesson is in that language, and the config remembers the choice. Or pick it at launch, by code or by name in English or in the language itself:
-
-```bash
-keybr-tui --language fr         # switch to French; later runs remember it
-keybr-tui --language français   # the same, by name
-keybr-tui --language en         # back to English
-```
-
-Each language keeps its own stats (`stats.json` for English, `stats-<code>.json` for the others, such as `stats-fr.json`), so switching never mixes them. Combination drills (`focus_pattern`) exist only for English and English (UK). Typing letters outside `a`-`z` needs a keyboard layout for that language in your OS and a UTF-8 terminal.
+Switch with the Language row in Settings, or at launch with `--language fr` (a name such as `français` works too). Each language keeps its own stats, and keybr-tui remembers your choice.
 
 ## Configuration
 
-keybr-tui runs with zero config. To change the defaults, edit `~/.config/keybr-tui/config.toml` (the XDG path on Linux):
-
-```toml
-target_wpm = 35
-error_mode = "forgive-mistakes"  # or "stop-on-error"
-fragment_length = 100
-```
-
-<details>
-<summary>All config options</summary>
-
-| Key | Default | Description |
-|---|---|---|
-| `target_wpm` | `35` | Target speed in words per minute; drives the confidence threshold |
-| `error_mode` | `"forgive-mistakes"` | `"forgive-mistakes"` advances past typos, `"stop-on-error"` blocks until you correct them |
-| `fragment_length` | `100` | Characters of practice text generated per lesson |
-| `natural_words` | `true` | Draw lessons from real words of the practice language that fit your active letters, with phonetic words filling in when fewer than 15 fit, as on keybr.com |
-| `daily_goal_minutes` | `30` | Daily practice goal in minutes; `0` hides the daily-goal indicator |
-| `alphabet_size` | `0.0` | Fraction of the non-starter alphabet to force-unlock regardless of confidence (keybr's `alphabetSize`), clamped to the range 0.0 to 1.0 |
-| `focus_letter` | `unset` | Pins one unlocked letter, given as a single lowercase letter of the practice alphabet, so every generated word contains it; omit the key (or cycle the Settings "Focus letter" row to Auto) for the automatic weakest-key focus |
-| `focus_pattern` | `unset` | Pins one combination drill: a bigram (`"cr"`, `"pl"`, `"br"`, `"tr"`, `"gr"`, `"fr"`, `"bl"`, `"cl"`) or a word ending (`"-ing"`, `"-ed"`, `"-er"`, `"-ly"`, `"-tion"`, `"-ment"`, `"-able"`, `"-ous"`), so every generated word matches it instead of just containing one letter; only takes effect while the pattern is on offer, meaning its letters are unlocked and the dictionary has at least 8 distinct words for it, and setting it clears `focus_letter` since the two share one focus slot |
-| `language` | `"en"` | Practice language, as a code from [Languages](#languages) (`"fr"`, `"en-gb"`); `--language` and the Settings "Language" row set it too |
-
-</details>
-
-Stats are stored separately. Run `keybr-tui --data-dir` to find them.
+keybr-tui needs no configuration: change settings on the Settings screen (main menu, **Settings**), and each change is saved at once. Settings live in `config.toml` (`~/.config/keybr-tui/` on Linux), which also holds a few options the screen does not show, such as the daily goal. [docs/configuration.md](docs/configuration.md) lists every setting, every key, and the file's path on macOS and Windows.
 
 ## Documentation
 
+- [docs/configuration.md](docs/configuration.md): every setting and `config.toml` key
 - [docs/comparison.md](docs/comparison.md): how keybr-tui compares to other typing trainers
 - [docs/faq.md](docs/faq.md): frequently asked questions
 - [docs/troubleshooting.md](docs/troubleshooting.md): common issues and fixes
@@ -183,4 +146,4 @@ keybr-tui ports the learning algorithm of [keybr.com](https://www.keybr.com) by 
 
 ## License
 
-Copyright (C) 2026 keybr-tui contributors. keybr-tui is licensed under the [GNU Affero General Public License v3.0 only](LICENSE) because it includes and adapts AGPLv3 material from [keybr.com](https://github.com/aradzie/keybr.com). Releases up to and including 0.3.0 were labelled MIT but already contained that material. See [NOTICE](NOTICE) for third-party and prior-license notices.
+Copyright (C) 2026 keybr-tui contributors. keybr-tui is licensed under the [GNU Affero General Public License v3.0 only](LICENSE) because it includes and adapts AGPLv3 material from [keybr.com](https://github.com/aradzie/keybr.com). See [NOTICE](NOTICE) for third-party notices.

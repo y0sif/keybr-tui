@@ -1,90 +1,71 @@
 # Troubleshooting
 
-If you hit a problem not listed here, please open an issue at https://github.com/y0sif/keybr-tui/issues.
+Each entry gives the symptom, its cause and the fix. For anything else, see [Reporting bugs](#reporting-bugs).
 
 ## Text rendering looks broken / characters misaligned
 
 **Symptom**: The typing line wraps oddly, the cursor sits on the wrong column, or characters overlap.
 
-**Cause**: The terminal is rendering with a proportional or non-Unicode font, or the window is too narrow for the layout to compute correctly.
+**Cause**: The terminal is rendering with a proportional or non-Unicode font, or the window is too small for the layout.
 
-**Fix**: Switch to a true monospace font (a Nerd Font or any standard mono works), and resize the terminal to at least 80 columns by 24 rows.
+**Fix**: Switch to a monospace font (a Nerd Font or any standard mono works), and resize the terminal to at least 80 columns by 24 rows.
 
 ## Colors look wrong or muted
 
 **Symptom**: The focus key, error highlights, or accent colors render as plain gray or look washed out.
 
-**Cause**: Terminal color profile mismatch — the emulator is reporting a palette keybr-tui's `Style` values do not map cleanly onto.
+**Cause**: keybr-tui draws only with the 16 standard ANSI colors, so your terminal's color theme decides how they look. A theme that maps several of them to similar shades hides the difference.
 
-**Fix**: Check `$TERM` and `$COLORTERM` in your shell. For most modern emulators you want `TERM=xterm-256color` and `COLORTERM=truecolor`. Restart the emulator after changing them.
-
-```bash
-echo $TERM
-echo $COLORTERM
-```
+**Fix**: Pick a theme whose red, green, yellow, white and bright black (dark gray) are clearly distinct, along with their bright variants.
 
 ## Keypress feels laggy
 
 **Symptom**: There is a visible delay between pressing a key and the character appearing, or WPM readings seem lower than they should be.
 
-**Cause**: Input buffering somewhere in the stack — most commonly tmux passthrough or an SSH session with a slow link.
+**Cause**: Input buffering between your keyboard and keybr-tui, most commonly in tmux or over an SSH session with a slow link.
 
-**Fix**: Run keybr-tui directly in the terminal emulator (no tmux, no screen, no SSH) and compare. If latency disappears, the buffering layer is the multiplexer, not keybr-tui.
+**Fix**: Run keybr-tui directly in the terminal emulator (no tmux, no screen, no SSH) and compare. If the delay disappears, the layer in between is the cause.
 
 ## Stats reset every run
 
-**Symptom**: Per-key confidence and session history are empty every time you launch the app.
+**Symptom**: Per-key speeds and session history are empty every time you launch the app.
 
-**Cause**: The data directory does not exist or is not writable, so keybr-tui falls back to an in-memory profile.
+**Cause**: keybr-tui could not save your stats, or it is loading another language's stats.
 
-**Fix**: Locate the resolved path and check permissions on the parent directory:
+**Fix**:
 
-```bash
-keybr-tui --data-dir
-ls -ld ~/.local/share/keybr-tui/
-```
-
-Make sure the directory exists and is writable by your user. If a save fails, keybr-tui prints `Error: could not save stats to <path>: <reason>` (or `config`) when you quit, and exits with status 1.
+- Read the terminal after you quit. A failed save prints `Error: could not save stats to <path>: <reason>` (or `config`) and keybr-tui exits with status 1. Make sure your user can write to the folder `keybr-tui --data-dir` prints.
+- Each language keeps its own stats: check the Language row in Settings.
+- A `--reset` in an alias or a script starts fresh on every run.
 
 ## "Moved it to ... .corrupt-..." warning
 
-**Symptom**: After quitting you see `Warning: malformed stats at <path>: ... Moved it to <path>.corrupt-<time>. Starting fresh.` For the config file it reads `Warning: malformed config at <path>: ... Using defaults.` A file that cannot be read at all says `could not read` instead of `malformed`. Your stats or settings are back to defaults.
+**Symptom**: After quitting you see `Warning: malformed stats at <path>: ... Moved it to <path>.corrupt-<time>. Starting fresh.` For the config file it ends in `Using defaults.`, and a file that cannot be read at all says `could not read` instead of `malformed`. Your stats or settings are back to defaults.
 
-**Cause**: The file existed but could not be read or parsed when keybr-tui loaded it (at launch, or on a language switch in Settings). Saves are atomic, so a crash or a closed terminal during a save leaves the old or the new file, never a broken one. A broken file usually comes from an older version killed mid-save, an edit by hand, or a sync tool.
+**Cause**: The file existed but could not be read or parsed when keybr-tui loaded it. In `config.toml`, one invalid value (an unknown `error_mode`, or text where a number belongs) makes the whole file unreadable. Saves never leave a half-written file, so the usual causes are a hand edit or a sync tool.
 
-**Fix**: keybr-tui never overwrites the broken file: it is kept next to the original with the `.corrupt-<time>` suffix. To get it back, quit keybr-tui and copy the `.corrupt-<time>` file (once fixed) or a backup over the file the warning names. `<time>` is the Unix time in seconds, with `-1`, `-2` added if that name is taken.
+**Fix**: keybr-tui never overwrites the broken file: it stays next to the original with the `.corrupt-<time>` suffix (Unix seconds). Quit keybr-tui, then copy the fixed `.corrupt-` file, or a backup, over the file the warning names. [Configuration](configuration.md#configtoml) lists every valid key and value.
 
 ## Can't find the config file
 
 **Symptom**: You edited `config.toml` but settings did not change, or you cannot find the file at all.
 
-**Cause**: The config file is not auto-created on first run. keybr-tui ships with sensible defaults and only reads the file if you put one in place.
+**Cause**: keybr-tui creates `config.toml` the first time it saves a setting, and its folder depends on the OS. A running keybr-tui rewrites the whole file on its next save, so an edit made while it runs is lost.
 
-**Fix**: Create it manually at `~/.config/keybr-tui/config.toml` (or the platform equivalent). See the configuration section in the README for the available keys.
-
-```toml
-target_wpm = 50
-error_mode = "move-on"
-```
+**Fix**: Change any value on the Settings screen to create the file, quit, then edit it. [Configuration](configuration.md#configtoml) gives its path on each OS and every key.
 
 ## Crash on startup
 
 **Symptom**: keybr-tui exits immediately with an error or panic message before the UI appears.
 
-**Cause**: Could be a missing data directory, an incompatible terminal, or a genuine bug. A corrupted stats or config file does not crash it: see the `.corrupt-` warning above.
+**Cause**: keybr-tui needs an interactive terminal, so it stops with an error when none is attached, as in a cron job or a service. Anything else is a bug: a broken stats or config file never stops it (see the `.corrupt-` warning above).
 
-**Fix**: Capture a backtrace and attach it to a GitHub issue so the cause can be identified:
+**Fix**: Run it in a terminal window. If it still exits, capture the message and attach it to a bug report:
 
 ```bash
-RUST_BACKTRACE=1 keybr-tui 2>&1 | tee crash.log
+RUST_BACKTRACE=1 keybr-tui 2> crash.log
 ```
 
 ## Reporting bugs
 
-When opening an issue, please include:
-
-- Operating system and version (e.g. Arch Linux, macOS 14, Windows 11).
-- Terminal emulator and version (e.g. Alacritty 0.13, WezTerm 20240203).
-- keybr-tui version from `keybr-tui --version`.
-- Reproduction steps — what you ran, what you expected, what you saw.
-- Relevant log output, ideally captured with `RUST_BACKTRACE=1`.
+Open an issue with the [bug report template](https://github.com/y0sif/keybr-tui/issues/new/choose), which lists what to include.

@@ -1,7 +1,7 @@
 //! Import a keybr.com data export (`typing-data.json`) and rebuild the
 //! learning state exactly as keybr.com would compute it.
 //!
-//! keybr.com stores no derived state — on every page load it replays the
+//! keybr.com stores no derived state: on every page load it replays the
 //! raw result list through a per-key EMA (alpha = 0.1 on each session's
 //! mean `timeToType`) and derives unlocks/focus from the smoothed times.
 //! We do the same replay once and persist the outcome as `SavedStats`,
@@ -39,7 +39,7 @@ pub fn run_import(
         .ok_or_else(|| eyre!("could not determine the data directory"))?;
     if stats_path.exists() && !force {
         return Err(eyre!(
-            "stats already exist at {} — re-run with --force to replace them \
+            "stats already exist at {}: re-run with --force to replace them \
              (a .bak backup will be kept)",
             stats_path.display()
         ));
@@ -48,7 +48,7 @@ pub fn run_import(
     let contents = std::fs::read_to_string(path)
         .wrap_err_with(|| format!("could not read {}", path.display()))?;
     let records: Vec<ExportRecord> = serde_json::from_str(&contents)
-        .wrap_err("not a keybr.com export — expected a JSON array of result records")?;
+        .wrap_err("not a keybr.com export: expected a JSON array of result records")?;
 
     let (saved, summary) = replay(&records, target_cpm, language, choice);
     if summary.imported == 0 {
@@ -75,7 +75,7 @@ pub fn run_import(
         println!("{line}");
     }
     println!(
-        "Unlocked letters: {}/{}{} — derived against your {:.0} WPM target \
+        "Unlocked letters: {}/{}{}, derived against your {:.0} WPM target \
          (from --target-wpm or config.toml; changing it re-derives, like keybr.com).",
         summary.unlocked_letters,
         language.letters().len(),
