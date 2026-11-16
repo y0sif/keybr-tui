@@ -41,7 +41,7 @@
     "license": "https://www.gnu.org/licenses/agpl-3.0.html",
     "url": "https://y0sif.github.io/keybr-tui/",
     "downloadUrl": "https://github.com/y0sif/keybr-tui/releases",
-    "softwareVersion": "0.3.1",
+    "softwareVersion": "0.3.2",
     "author": {
       "@type": "Person",
       "name": "y0sif",
@@ -79,7 +79,7 @@
         "name": "Can I import my keybr.com data into keybr-tui?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "Yes. On keybr.com open your profile and click Download data to get a typing-data.json file, then run 'keybr-tui --import typing-data.json'. The importer replays every session through the same per-key smoothing keybr.com uses, so your unlocked letters, per-key speeds, and focus letter come out exactly as the website computed them."
+          "text": "Yes. On keybr.com open your profile and click Download data to get a typing-data.json file, then run 'keybr-tui --import typing-data.json'. The importer replays your practice language's sessions in one layout family through the same per-key smoothing keybr.com uses, so your unlocked letters, per-key speeds, and focus letter match the website."
         }
       },
       {
@@ -296,7 +296,6 @@
     <p class="lead"><strong>keybr.com's adaptive algorithm, ported to the command line.</strong> keybr-tui times every key you press, finds the ones slowing you down, and builds drills aimed straight at them. A faithful port of the keybr.com engine that runs fully offline, with optional import of your keybr.com history.</p>
     <div class="badges">
       <a href="https://crates.io/crates/keybr-tui"><img src="https://img.shields.io/crates/v/keybr-tui.svg" alt="crates.io version"></a>
-      <a href="https://docs.rs/keybr-tui"><img src="https://img.shields.io/docsrs/keybr-tui" alt="docs.rs"></a>
       <a href="https://github.com/y0sif/keybr-tui/actions/workflows/ci.yml"><img src="https://github.com/y0sif/keybr-tui/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
       <a href="https://github.com/y0sif/keybr-tui/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg" alt="AGPL-3.0 License"></a>
     </div>
@@ -319,7 +318,7 @@
         Also available as a
         <a href="https://github.com/y0sif/keybr-tui/releases/latest">pre-built binary</a> /
         <a href="https://crates.io/crates/keybr-tui">crate</a> /
-        <a href="https://github.com/y0sif/keybr-tui#from-source">source build</a>
+        <a href="https://github.com/y0sif/keybr-tui#install">source build</a>
         for Linux, macOS, and Windows.
       </p>
     </div>
@@ -330,7 +329,7 @@
       <div class="features">
         <div class="feature">
           <h3>Adaptive text generation</h3>
-          <p>Phonetic Markov chains generate pronounceable pseudo-words from your active letters. A faithful port of the keybr.com algorithm, not a wordlist or random characters.</p>
+          <p>Lessons use real words from keybr.com's word lists that fit your active letters, padded with pronounceable pseudo-words from its phonetic model when too few fit. A faithful port of the keybr.com algorithm, not random characters.</p>
         </div>
         <div class="feature">
           <h3>Per-key confidence</h3>
@@ -362,7 +361,7 @@
         <div class="step"><div><strong>Letter scheduling.</strong> <p>You start with a small set of letters. The scheduler tracks per-key reaction time with exponential smoothing and computes a confidence score against your target speed.</p></div></div>
         <div class="step"><div><strong>Unlocking.</strong> <p>When all active letters reach sufficient confidence, a new letter is unlocked from a frequency-ordered list.</p></div></div>
         <div class="step"><div><strong>Focus key.</strong> <p>The weakest key in your active set becomes the focus key and appears more often in generated text until it catches up.</p></div></div>
-        <div class="step"><div><strong>Text generation.</strong> <p>A Markov chain trained on English phonetic patterns produces pronounceable pseudo-words using only your active letters, biased toward the focus key.</p></div></div>
+        <div class="step"><div><strong>Text generation.</strong> <p>Lessons draw real words that use only your active letters, biased toward the focus key. Each language's keybr.com phonetic model adds pronounceable pseudo-words when too few words fit.</p></div></div>
         <div class="step"><div><strong>Tracking.</strong> <p>At the end of each lesson, every key's mean latency updates its moving average, the same per-result smoothing keybr.com applies.</p></div></div>
       </div>
     </section>
@@ -423,7 +422,6 @@
     <p>
       <a href="https://github.com/y0sif/keybr-tui">GitHub</a> &middot;
       <a href="https://crates.io/crates/keybr-tui">crates.io</a> &middot;
-      <a href="https://docs.rs/keybr-tui">docs.rs</a> &middot;
       AGPL-3.0 License
     </p>
     <p style="margin-top: 8px;">Ports the <a href="https://www.keybr.com">keybr.com</a> algorithm. Built with <a href="https://ratatui.rs/">ratatui</a>.</p>
