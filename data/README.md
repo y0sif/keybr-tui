@@ -1,6 +1,6 @@
 # keybr.com data
 
-This directory holds the phonetic model and the word list of each of keybr-tui's 27 practice
+This directory holds the phonetic model and the word list of each of keybr-tui's practice
 languages, copied from the [keybr.com source tree](https://github.com/aradzie/keybr.com) by
 aradzie. keybr.com is licensed under the
 [GNU AGPLv3](https://github.com/aradzie/keybr.com/blob/05a37bc5265f65ff538c59c613db29442f345d51/LICENSE),

@@ -38,8 +38,8 @@ cargo test
 cargo build --release
 ```
 
-`cargo fmt --all` fixes what the format check reports. `just check` runs the format, clippy and
-test steps.
+`cargo fmt --all` fixes what the format check reports. `just check` runs every check except the
+release build.
 
 ## Code Style
 

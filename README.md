@@ -58,6 +58,8 @@ keybr-tui keeps a per-key model of your speed and accuracy and uses it to decide
 
 ## Features
 
+keybr-tui runs keybr.com's adaptive lessons and progress tracking in your terminal.
+
 | Feature | What you get |
 |---|---|
 | **keybr.com import** | Your unlocked letters and key speeds from a keybr.com data export |
@@ -68,6 +70,8 @@ keybr-tui keeps a per-key model of your speed and accuracy and uses it to decide
 | **Local and offline** | No account, no network, stats saved as plain local files |
 
 ## Usage
+
+Run `keybr-tui` to start practicing; every flag below is optional.
 
 ```bash
 keybr-tui [OPTIONS]
@@ -112,7 +116,7 @@ The import replays your sessions the way keybr.com does, so your unlocked letter
 
 ## Languages
 
-keybr-tui teaches 27 languages, each with keybr.com's own word list, phonetic model and letter order.
+Switch the practice language with the Language row in Settings, or at launch with `--language fr` (a name such as `français` works too). Each language keeps its own stats, and keybr-tui remembers your choice.
 
 | Code | Language | Code | Language | Code | Language |
 |---|---|---|---|---|---|
@@ -126,11 +130,9 @@ keybr-tui teaches 27 languages, each with keybr.com's own word list, phonetic mo
 | `es` | Spanish (Español) | `lv` | Latvian (Latviešu) | `tr` | Turkish (Türkçe) |
 | `et` | Estonian (Eesti) | `nb` | Norwegian Bokmål (Norsk bokmål) | `uk` | Ukrainian (Українська) |
 
-Switch with the Language row in Settings, or at launch with `--language fr` (a name such as `français` works too). Each language keeps its own stats, and keybr-tui remembers your choice.
-
 ## Configuration
 
-keybr-tui needs no configuration: change settings on the Settings screen (main menu, **Settings**), and each change is saved at once. Settings live in `config.toml` (`~/.config/keybr-tui/` on Linux), which also holds a few options the screen does not show, such as the daily goal. [docs/configuration.md](docs/configuration.md) lists every setting, every key, and the file's path on macOS and Windows.
+keybr-tui needs no configuration: change settings on the Settings screen (main menu, **Settings**). Settings live in `config.toml`, which also holds a few options the screen does not show, such as the daily goal. [docs/configuration.md](docs/configuration.md) lists every setting, every key, and the file's path on each OS.
 
 ## Documentation
 
