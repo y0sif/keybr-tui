@@ -2,18 +2,34 @@
 *.swp
 *.swo
 .DS_Store
-.claude/
 .worktrees/
 
-# Personal typing data exported from keybr.com — never commit
+# Agent context, private notes, generated code graphs
+.claude/
+CLAUDE.local.md
+graphify-out/
+
+# Internal files: specs, plans, notes, benchmarks, handoffs
+/specs/
+/bench/
+/results/
+/memory/
+NOTES.md
+PLAN.md
+BENCHMARKS.md
+HANDOFF.md
+MEMORY.md
+next-session*.md
+
+# docs/ publishes only the pages listed here; anything else in it stays local
+/docs/*
+!/docs/comparison.md
+!/docs/configuration.md
+!/docs/faq.md
+!/docs/troubleshooting.md
+
+# A keybr.com data export, under the name keybr.com gives it
 /typing-data.json
 
-# Internal-only docs (kept locally for agent context, not published)
-/docs/plan/
-/docs/architecture.md
-/docs/brand_identity.md
-/docs/file_structure.md
-/docs/project_overview.md
-/docs/ratatui.md
-/docs/rust_reference.md
+# Rendered demo output
 demo/out/
