@@ -1,5 +1,5 @@
 {
-  description = "keybr-tui: a terminal typing trainer with adaptive learning";
+  description = "Adaptive TUI typing trainer in Rust, bringing keybr.com's algorithm to your terminal. Offline touch-typing practice that imports your keybr.com data export.";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -28,7 +28,7 @@
           src = ./.;
           cargoLock.lockFile = ./Cargo.lock;
           meta = with pkgs.lib; {
-            description = "Adaptive terminal (TUI) typing trainer in Rust that ports the keybr.com algorithm, runs offline, and imports your keybr.com data";
+            description = "Adaptive TUI typing trainer in Rust, bringing keybr.com's algorithm to your terminal. Offline touch-typing practice that imports your keybr.com data export.";
             homepage = "https://y0sif.github.io/keybr-tui/";
             license = licenses.agpl3Only;
             maintainers = [ ];

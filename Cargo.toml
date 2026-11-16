@@ -3,20 +3,24 @@ name = "keybr-tui"
 version = "0.3.1"
 edition = "2021"
 rust-version = "1.88"
-authors = ["y0sif <yosif@outbond.io>"]
 license = "AGPL-3.0-only"
-description = "Adaptive terminal (TUI) typing trainer in Rust that ports the keybr.com algorithm, runs offline, and imports your keybr.com data"
+description = "Adaptive TUI typing trainer in Rust, bringing keybr.com's algorithm to your terminal. Offline touch-typing practice that imports your keybr.com data export."
 repository = "https://github.com/y0sif/keybr-tui"
 homepage = "https://y0sif.github.io/keybr-tui/"
-documentation = "https://docs.rs/keybr-tui"
 keywords = ["typing", "typing-trainer", "tui", "terminal", "keybr"]
 categories = ["command-line-utilities"]
 readme = "README.md"
-exclude = ["assets/", "demo/"]
-
-[package.metadata.docs.rs]
-all-features = true
-rustdoc-args = ["--cfg", "docsrs"]
+include = [
+    "/src/**/*.rs",
+    "/data/model-*.data",
+    "/data/wordlist-*.txt",
+    "/data/README.md",
+    "/Cargo.toml",
+    "/Cargo.lock",
+    "/README.md",
+    "/LICENSE",
+    "/NOTICE",
+]
 
 [dependencies]
 ratatui = "0.30.2"
